@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import os
+import importlib
 import pandas as pd
 import streamlit as st
 from typing import Any, Dict, List
 
 # Import the verifier from tests so we reuse the same logic
+import tests.verify_cluster
+importlib.reload(tests.verify_cluster)
 from tests.verify_cluster import load_nodes, run_all_checks
+
+# Force refresh - v3
 
 
 def render_status_badge(ok: bool) -> str:
@@ -22,9 +27,23 @@ def main() -> None:
     st.write('Nodes to check:')
     st.write(nodes)
 
+    # SSH credentials section
+    st.markdown('### SSH Credentials (Optional)')
+    st.markdown('_Leave blank to skip SSH authentication checks (only test port connectivity)._')
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input('SSH Username', value='root', key='ssh_username')
+    with col2:
+        password = st.text_input('SSH Password', type='password', key='ssh_password', help='Password for SSH authentication')
+    
     if st.button('Run Checks'):
         with st.spinner('Running checks...'):
-            results = run_all_checks()
+            # Pass password only if provided
+            results = run_all_checks(
+                password=password if password else None,
+                username=username
+            )
 
         # Build a dataframe for nicer display
         rows = []

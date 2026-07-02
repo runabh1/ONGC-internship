@@ -148,7 +148,21 @@ def render_sidebar(instances: list[str]) -> tuple[str, str, int, str, bool]:
     return instance, metric, hours, prometheus_url, auto_refresh
 
 
-def run_detectors(df: pd.DataFrame, metric_name: str) -> dict[str, Any]:
+def run_detectors(df: pd.DataFrame, metric_name: str, instance: str = None) -> dict[str, Any]:
+    # If analyzing all nodes, run detectors per-instance and aggregate
+    if instance == 'All nodes' and 'instance' in df.columns:
+        unique_instances = df['instance'].unique()
+        all_results: dict[str, Any] = {}
+        
+        for inst in unique_instances:
+            inst_df = df[df['instance'] == inst].reset_index(drop=True)
+            if inst_df.empty:
+                continue
+            inst_results = run_detectors(inst_df, metric_name, instance=None)
+            all_results[str(inst)] = inst_results
+        
+        return all_results
+    
     detectors = {
         'Rolling Mean': RollingMeanDetector(metric=metric_name),
         'EWMA': EWMAAnomalyDetector(metric=metric_name),
@@ -214,7 +228,17 @@ def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], 
     avg_value = float(df['value'].mean()) if not df.empty else 0.0
     anomaly_scores = [r['score'] for r in results.values() if 'score' in r]
     overall_score = float(sum(anomaly_scores) / len(anomaly_scores)) if anomaly_scores else 0.0
-    status = 'Healthy' if overall_score < 0.3 else 'Warning' if overall_score < 0.7 else 'Alert'
+    
+    # Check for critical instances by analyzing anomalies
+    critical_count = 0
+    if not anomalies_df.empty and 'instance' in anomalies_df.columns:
+        critical_count = len(anomalies_df['instance'].unique())
+    
+    # Determine status: if any Critical anomalies detected, show Alert; otherwise use score-based logic
+    if critical_count > 0:
+        status = 'Alert' if critical_count >= len(instances) / 2 else 'Warning'
+    else:
+        status = 'Healthy' if overall_score < 0.3 else 'Warning' if overall_score < 0.7 else 'Alert'
     incident_summary = summarize_recent_incidents(anomalies_df)
     history_line = (
         f"Last 1h: {incident_summary['incident_count']} incident(s), affected {incident_summary['affected_nodes']} node(s), last at {incident_summary['last_anomaly'].strftime('%Y-%m-%d %H:%M')}"
@@ -427,7 +451,29 @@ def main() -> None:
 
     init_alert_session_state()
     df = add_rolling_features(df)
-    results = run_detectors(df, selected_metric)
+    results = run_detectors(df, selected_metric, instance)
+    
+    # Normalize results structure: if per-instance, convert to model-centric format
+    if instance == 'All nodes' and 'instance' in df.columns and isinstance(results, dict):
+        # Check if results is per-instance (first key is an instance name, value is dict of models)
+        first_value = next(iter(results.values())) if results else None
+        if isinstance(first_value, dict) and 'Rolling Mean' in first_value:
+            # Per-instance format - convert to model-centric
+            model_centric_results: dict[str, Any] = {
+                'Rolling Mean': {'anomalies': [], 'summary': {}, 'score': 0.0},
+                'EWMA': {'anomalies': [], 'summary': {}, 'score': 0.0},
+                'Z Score': {'anomalies': [], 'summary': {}, 'score': 0.0},
+                'Isolation Forest': {'anomalies': [], 'summary': {}, 'score': 0.0},
+            }
+            for inst_name, inst_models in results.items():
+                for model_name, model_data in inst_models.items():
+                    if isinstance(model_data, dict) and 'anomalies' in model_data:
+                        model_centric_results[model_name]['anomalies'].extend(model_data['anomalies'])
+                        model_centric_results[model_name]['summary'] = model_data.get('summary', {})
+                        # Use MAX score across instances (any anomaly in any instance should be reported)
+                        current_score = model_data.get('score', 0.0)
+                        model_centric_results[model_name]['score'] = max(model_centric_results[model_name]['score'], current_score)
+            results = model_centric_results
 
     latest_values = (
         df.sort_values('timestamp')

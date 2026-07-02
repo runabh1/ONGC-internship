@@ -12,7 +12,7 @@ from ml.utils import AnomalyResult, ensure_df_index
 @dataclass
 class IsolationForestDetector:
     metric: str
-    contamination: float = 0.05
+    contamination: float = 0.15
     random_state: int = 42
     model: IsolationForest | None = None
 
