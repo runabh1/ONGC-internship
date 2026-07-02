@@ -396,6 +396,66 @@ def render_chart(df: pd.DataFrame, metric_name: str, anomalies: pd.DataFrame | N
     st.plotly_chart(fig, use_container_width=True)
 
 
+def render_individual_node_charts(df: pd.DataFrame, metric_name: str, anomalies: pd.DataFrame | None = None) -> None:
+    """Render individual charts for each node."""
+    if df.empty:
+        return
+    
+    # Get unique instances and sort them
+    instances = sorted(df['instance'].unique())
+    
+    if len(instances) <= 1:
+        return
+    
+    st.markdown('---')
+    st.markdown('### Individual Node Charts')
+    
+    # Create columns for 3 nodes (or fewer if available)
+    cols = st.columns(min(3, len(instances)))
+    
+    for idx, instance in enumerate(instances):
+        col = cols[idx % 3]
+        
+        with col:
+            # Filter data for this instance
+            instance_data = df[df['instance'] == instance]
+            
+            # Filter anomalies for this instance
+            instance_anomalies = None
+            if anomalies is not None and not anomalies.empty:
+                instance_anomalies = anomalies[anomalies['instance'] == instance]
+            
+            # Create chart for this instance
+            fig = px.line(
+                instance_data,
+                x='timestamp',
+                y='value',
+                title=f'{instance}',
+                markers=False
+            )
+            fig.update_layout(
+                height=350,
+                showlegend=False,
+                hovermode='x unified'
+            )
+            
+            # Add anomaly markers if present
+            if instance_anomalies is not None and not instance_anomalies.empty:
+                try:
+                    scatter = go.Scatter(
+                        x=instance_anomalies['timestamp'],
+                        y=instance_anomalies['value'],
+                        mode='markers',
+                        marker=dict(color='red', size=8),
+                        name='Anomalies',
+                    )
+                    fig.add_trace(scatter)
+                except Exception:
+                    pass
+            
+            st.plotly_chart(fig, use_container_width=True)
+
+
 def render_ml_insights(results: dict[str, Any]) -> None:
     st.markdown('### ML model insights')
     for name, info in results.items():
@@ -498,6 +558,7 @@ def main() -> None:
     render_summary(df, selected_metric, results, anomalies_df)
     render_consensus(results, latest_values)
     render_chart(df, selected_metric, anomalies=anomalies_df)
+    render_individual_node_charts(df, selected_metric, anomalies=anomalies_df)
     render_ml_insights(results)
 
 
