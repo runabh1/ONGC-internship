@@ -1,0 +1,28 @@
+# Python virtual environments
+.venv/
+.venv_tf/
+venv/
+ENV/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Logs and reports
+*.log
+TEST_REPORT.md

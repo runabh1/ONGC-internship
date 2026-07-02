@@ -1,0 +1,28 @@
+global:
+  resolve_timeout: 5m
+route:
+  receiver: team-email
+  group_by: ['alertname', 'instance']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+receivers:
+  - name: team-email
+    email_configs:
+      - to: 'ops@example.com'
+        from: 'alertmanager@example.com'
+        smarthost: '<SMTP_HOST>:<SMTP_PORT>'
+        auth_username: '<SMTP_USERNAME>'
+        auth_identity: '<SMTP_IDENTITY>'
+        auth_password: '<SMTP_PASSWORD>'
+        require_tls: true
+  - name: slack-webhook
+    webhook_configs:
+      - url: '<SLACK_WEBHOOK_URL>'
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
