@@ -1,68 +1,54 @@
 # ONGC Cluster Monitor
 
-A Streamlit-based monitoring dashboard for Prometheus node metrics, enhanced with ML-driven anomaly detection and incident alerting.
+A Docker-based monitoring stack for Prometheus node metrics, ML-driven anomaly detection, and incident alerting.
+
+This repository is designed to be cloned and run on a different machine with minimal setup. The recommended deployment path is Docker Compose, which starts:
+
+- Prometheus for metric collection
+- Alertmanager for alert routing
+- Streamlit for the dashboard UI
 
 ## What this app does
 
-- Queries Prometheus for node metrics such as CPU utilization.
-- Detects anomalies using multiple ML detectors: rolling mean, EWMA, z-score, and Isolation Forest.
-- Synthesizes a per-node ML consensus severity score.
-- Shows peak vs current CPU values clearly in the `ML Consensus` section.
-- Summarizes recent incidents across nodes and merges consecutive anomaly events into incident groups.
-- Supports email notifications for `Critical` incidents with deduplication.
+- Queries Prometheus for node metrics such as CPU utilization, memory availability, and load.
+- Detects anomalies with multiple ML detectors: rolling mean, EWMA, z-score, and Isolation Forest.
+- Aggregates the per-node ML severity into a single consensus view.
+- Displays incidents and incident groups in the dashboard and alert pages.
+- Supports email notifications for `Critical` incidents when SMTP credentials are configured.
 - Supports auto-refresh every 30 seconds from the sidebar.
 
-## Features implemented
+## Prerequisites
 
-- **Dynamic Prometheus node discovery** via the `up` metric.
-- **Manual node input fallback** when auto-discovery fails.
-- **Incident consolidation** for consecutive anomaly timestamps.
-- **Local timezone display** for alert timestamps.
-- **ML consensus visibility** with peak and current CPU values.
-- **Email alerts** for Critical node incidents.
-- **Email deduplication** so the same node/severity pair is not emailed more than once every 30 minutes.
-- **Auto-refresh toggle** for live dashboard updates every 30 seconds.
+Install the following on the machine that will run the stack:
 
-## Project structure
+- Git
+- Docker Desktop (or Docker Engine + Docker Compose)
 
-- `streamlit_app/app.py` — main dashboard and alerting logic.
-- `streamlit_app/pages/alerts.py` — alert listing and incident consolidation page.
-- `streamlit_app/pages/charts.py` — secondary chart view.
-- `streamlit_app/pages/tables.py` — secondary table view.
-- `streamlit_app/pages/infra_checker.py` — infrastructure health check using SSH and Prometheus.
-- `ml/` — anomaly detector implementations and Prometheus client.
-- `config/nodes.yaml` — optional Prometheus node target configuration.
-- `tests/` — smoke tests, exporter tests, and verification scripts.
-
-## Setup
-
-### Requirements
-
-Install dependencies from `requirements.txt`:
+## 1. Clone and enter the repo
 
 ```bash
-pip install -r requirements.txt
+git clone <your-repo-url>
+cd Ongc-cluster-monitor
 ```
 
-### Environment variables
+## 2. Create a local environment file
 
-Create a `.env` file or set the following environment variables before running the app.
+Copy the example file and edit it for your own environment:
 
-Required variables for email alerts:
+```bash
+copy .env.example .env
+```
 
-- `EMAIL_USER` — SMTP login username (usually your email address)
-- `EMAIL_PASSWORD` — SMTP password or Gmail app password
-- `ALERT_EMAIL_TO` — comma-separated list of recipient email addresses
+On Linux/macOS, use:
 
-Optional email variables:
+```bash
+cp .env.example .env
+```
 
-- `EMAIL_SMTP_SERVER` — SMTP server hostname (default: `smtp.gmail.com`)
-- `EMAIL_SMTP_PORT` — SMTP port (default: `587`)
-- `ALERT_EMAIL_FROM` — sender address (default: `EMAIL_USER`)
-
-Example `.env` entries:
+Edit `.env` and replace the placeholder values. At minimum, set the SMTP values if you want email alerts:
 
 ```env
+PROMETHEUS_URL=http://localhost:9090
 EMAIL_USER=youremail@gmail.com
 EMAIL_PASSWORD=your_app_password
 ALERT_EMAIL_TO=alerts@example.com,ops@example.com
@@ -71,53 +57,78 @@ EMAIL_SMTP_SERVER=smtp.gmail.com
 EMAIL_SMTP_PORT=587
 ```
 
-### Prometheus configuration
+> The app will still start without email settings, but email alerts will be disabled.
 
-- The app uses `PROMETHEUS_URL` to connect to Prometheus. It defaults to `http://localhost:9090`.
-- Node IPs are discovered from Prometheus via the `up` metric.
-- If Prometheus discovery fails, the sidebar allows manual node instance input.
+## 3. Configure your own node targets
 
-### Optional `config/nodes.yaml`
+Prometheus targets are defined in [config/nodes.yaml](config/nodes.yaml).
 
-This repository includes `config/nodes.yaml` for target configuration. It is primarily used by verification scripts, not the main Streamlit app.
+Replace the sample entries with your own node_exporter hosts or IP addresses:
 
-## Running the app
+```yaml
+- labels:
+    job: node_exporter
+  targets:
+    - 'YOUR_NODE_IP_1:9100'
+    - 'YOUR_NODE_IP_2:9100'
+```
 
-Launch the dashboard:
+Each target should be the host/IP where `node_exporter` is running and exposing port `9100`.
+
+If you need to change the scrape behavior, edit [config/prometheus.yml](config/prometheus.yml) as well.
+
+## 4. Start the stack
+
+From the repository root, run:
 
 ```bash
+docker compose -f docker/docker-compose.yml up --build -d
+```
+
+This will build the Streamlit image and start:
+
+- Prometheus: http://localhost:9090
+- Alertmanager: http://localhost:9093
+- Streamlit dashboard: http://localhost:8501
+
+## 5. Confirm everything is running
+
+Open the URLs above in your browser.
+
+Expected results:
+
+- Prometheus shows targets under the `node_exporter` job.
+- The Streamlit dashboard loads and shows node metrics or an empty state if no targets are reachable yet.
+- Alertmanager loads the web UI without errors.
+
+## 6. Stop the stack
+
+```bash
+docker compose -f docker/docker-compose.yml down
+```
+
+## Project structure
+
+- [streamlit_app/app.py](streamlit_app/app.py) — main dashboard and alerting logic.
+- [streamlit_app/pages/alerts.py](streamlit_app/pages/alerts.py) — alert listing and incident consolidation page.
+- [streamlit_app/pages/charts.py](streamlit_app/pages/charts.py) — secondary chart view.
+- [streamlit_app/pages/tables.py](streamlit_app/pages/tables.py) — secondary table view.
+- [streamlit_app/pages/infra_checker.py](streamlit_app/pages/infra_checker.py) — infrastructure health check using SSH and Prometheus.
+- [ml](ml) — anomaly detector implementations and Prometheus client.
+- [config/nodes.yaml](config/nodes.yaml) — Prometheus node target configuration.
+- [docker/Dockerfile.streamlit](docker/Dockerfile.streamlit) — container build definition for the Streamlit app.
+
+## Optional local development
+
+If you want to run the app directly instead of via Docker:
+
+```bash
+pip install -r requirements.txt
 streamlit run streamlit_app/app.py
 ```
 
-Then use the sidebar to:
+## Notes for email alerts
 
-- select Prometheus URL
-- pick a node or `All nodes`
-- choose a metric
-- adjust the lookback window
-- enable `Auto-refresh every 30s`
-
-## Email alert behavior
-
-- Alerts are sent only for node severity `Critical`.
-- Email notifications are deduplicated per node/severity pair.
-- The same node and severity combination will not be emailed more than once every 30 minutes.
-- The app still runs normally if email settings are missing; email alerts are simply disabled.
-
-## Deployment notes
-
-- For a different cluster, you do not need to modify `app.py`.
-- Users can deploy against new machines by pointing Prometheus at the new targets and/or entering the new node instance in the sidebar.
-- Verification and test scripts can also use the `NODES` environment variable.
-
-## Testing and verification
-
-- `pytest tests/test_exporter.py`
-- `pytest tests/test_prometheus.py`
-- `python tests/verify_cluster.py`
-
-## Troubleshooting
-
-- If the app fails to connect, verify that `PROMETHEUS_URL` is correct.
-- If email fails, verify that `EMAIL_USER`, `EMAIL_PASSWORD`, and `ALERT_EMAIL_TO` are set and valid.
-- For Gmail, use an app password instead of your normal account password.
+- Email alerts are only sent when the app sees a `Critical` incident and the SMTP settings are present.
+- For Gmail, use an app password instead of your regular account password.
+- If SMTP is not configured, the app will still run normally and skip email delivery.

@@ -23,6 +23,11 @@ Thumbs.db
 # Streamlit
 .streamlit/
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Logs and reports
 *.log
 TEST_REPORT.md
