@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import smtplib
+import time
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Tuple
@@ -221,24 +222,60 @@ def summarize_recent_incidents(anomalies_df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def compute_node_consensus(results: dict[str, Any], instances: list[str]) -> dict[str, dict[str, Any]]:
+    total_models = len(results)
+    per_instance_votes: dict[str, set[str]] = {}
+    per_instance_values: dict[str, list[float]] = {}
+
+    for model_name, info in results.items():
+        anomalies = info.get('anomalies', []) if isinstance(info, dict) else []
+        for a in anomalies:
+            inst = str(a.get('instance', 'unknown'))
+            per_instance_votes.setdefault(inst, set()).add(model_name)
+            value = None
+            if isinstance(a.get('details'), dict):
+                value = a['details'].get('value')
+            if value is None:
+                value = a.get('value')
+            if isinstance(value, (int, float)):
+                per_instance_values.setdefault(inst, []).append(float(value))
+
+    node_consensus: dict[str, dict[str, Any]] = {}
+    for inst in instances:
+        votes = len(per_instance_votes.get(inst, set()))
+        confidence = float(votes / total_models) if total_models else 0.0
+        peak_value = max(per_instance_values.get(inst, [])) if per_instance_values.get(inst) else None
+        severity = compute_consensus_severity(confidence, peak_value) if votes else 'Normal'
+        node_consensus[inst] = {
+            'instance': inst,
+            'votes': votes,
+            'confidence': confidence,
+            'peak_value': peak_value,
+            'severity': severity,
+            'models': sorted(per_instance_votes.get(inst, [])),
+        }
+
+    return node_consensus
+
+
 def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], anomalies_df: pd.DataFrame) -> None:
     st.markdown(_STYLES, unsafe_allow_html=True)
     instances = sorted(df['instance'].unique().tolist())
     latest = df.sort_values('timestamp').groupby('instance').tail(1)
     avg_value = float(df['value'].mean()) if not df.empty else 0.0
-    anomaly_scores = [r['score'] for r in results.values() if 'score' in r]
-    overall_score = float(sum(anomaly_scores) / len(anomaly_scores)) if anomaly_scores else 0.0
-    
-    # Check for critical instances by analyzing anomalies
-    critical_count = 0
-    if not anomalies_df.empty and 'instance' in anomalies_df.columns:
-        critical_count = len(anomalies_df['instance'].unique())
-    
-    # Determine status: if any Critical anomalies detected, show Alert; otherwise use score-based logic
-    if critical_count > 0:
-        status = 'Alert' if critical_count >= len(instances) / 2 else 'Warning'
+
+    node_consensus = compute_node_consensus(results, instances)
+    max_anomaly_score = max((info['confidence'] for info in node_consensus.values()), default=0.0)
+    severity_rank = {'Normal': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+    worst_node = max(node_consensus.values(), key=lambda info: severity_rank.get(info['severity'], 0)) if node_consensus else None
+    worst_severity = worst_node['severity'] if worst_node is not None else 'Normal'
+    if worst_severity == 'Critical':
+        status = 'Critical'
+    elif worst_severity != 'Normal':
+        status = 'Degraded'
     else:
-        status = 'Healthy' if overall_score < 0.3 else 'Warning' if overall_score < 0.7 else 'Alert'
+        status = 'Healthy'
+
     incident_summary = summarize_recent_incidents(anomalies_df)
     history_line = (
         f"Last 1h: {incident_summary['incident_count']} incident(s), affected {incident_summary['affected_nodes']} node(s), last at {incident_summary['last_anomaly'].strftime('%Y-%m-%d %H:%M')}"
@@ -246,16 +283,21 @@ def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], 
         else 'Last 1h: No incidents detected.'
     )
 
+    latest_statuses = [current_value_status(float(row['value'])) for _, row in latest.iterrows()] if not latest.empty else []
+    current_severity_rank = {'Normal': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+    current_cluster_status = max(latest_statuses, key=lambda s: current_severity_rank.get(s, 0)) if latest_statuses else 'Normal'
+    status_note = 'Cluster status reflects the worst incident observed within the selected lookback window, not necessarily current live values.'
+
     # Summary cards
     col1, col2, col3, col4 = st.columns([2,1,1,1])
     with col1:
         st.markdown(
-            f"<div class='card'><div class='metric-title'>Cluster status</div><h3>{status}</h3><div>AI anomaly score: <b>{overall_score:.2f}</b></div><div>{history_line}</div></div>",
+            f"<div class='card'><div class='metric-title'>Cluster status</div><h3>{status}</h3><div>Current cluster status: <b>{current_cluster_status}</b></div><div>AI anomaly score: <b>{max_anomaly_score:.2f}</b></div><div>{history_line}</div><div style='font-size:0.9em;color:#555;margin-top:8px;'>{status_note}</div></div>",
             unsafe_allow_html=True,
         )
     col2.metric('Nodes monitored', len(instances))
     col3.metric('Metric', metric_name)
-    col4.metric('Average value', f'{avg_value:.2f}')
+    col4.metric('Average CPU across cluster', f'{avg_value:.2f}')
 
     with st.expander('Latest node values'):
         st.dataframe(latest[['instance', 'metric_name', 'value', 'timestamp']].reset_index(drop=True))
@@ -295,8 +337,15 @@ def compute_consensus_severity(confidence: float, peak_value: float | None) -> s
 
 
 def render_auto_refresh(auto_refresh: bool) -> None:
-    if auto_refresh:
-        st.markdown('<meta http-equiv="refresh" content="30">', unsafe_allow_html=True)
+    if not auto_refresh:
+        return
+
+    interval_seconds = 30
+    now = time.time()
+    last_refresh = st.session_state.get('last_refresh', 0.0)
+    if now - last_refresh >= interval_seconds:
+        st.session_state['last_refresh'] = now
+        st.rerun()
 
 
 def current_value_status(current_value: float) -> str:
@@ -550,7 +599,7 @@ def main() -> None:
     anomalies_list: list[dict] = []
     for info in results.values():
         if isinstance(info, dict) and 'anomalies' in info and info['anomalies']:
-            anomalies_list.extend(info['anomalies'])
+            anomalies_list.extend([a for a in info['anomalies'] if a.get('is_anomaly')])
     anomalies_df = pd.DataFrame(anomalies_list) if anomalies_list else pd.DataFrame()
     if not anomalies_df.empty and 'timestamp' in anomalies_df.columns:
         anomalies_df['timestamp'] = pd.to_datetime(anomalies_df['timestamp'], utc=True)

@@ -17,4 +17,5 @@ def explain_anomalies(results: List[AnomalyResult]) -> List[Dict[str, Any]]:
             'details': result.details,
         }
         for result in results
+        if result.is_anomaly
     ]
