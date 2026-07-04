@@ -35,6 +35,8 @@ services:
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
       EMAIL_SMTP_SERVER: ${EMAIL_SMTP_SERVER:-smtp.gmail.com}
       EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-587}
+      NODES: ${NODES:-}
+      CLUSTER_NODES: ${CLUSTER_NODES:-}
     depends_on:
       - prometheus
     networks:
