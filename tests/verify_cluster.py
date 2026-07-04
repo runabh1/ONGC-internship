@@ -28,10 +28,10 @@ class CheckResult:
 
 def load_nodes() -> List[str]:
     """Load node addresses from environment or default list."""
-    nodes_str = os.getenv('CLUSTER_NODES') or os.getenv(
-        'NODES',
-        '192.168.56.101:9100,192.168.56.102:9100,192.168.56.103:9100',
-    )
+    default_nodes = '192.168.56.101:9100,192.168.56.102:9100,192.168.56.103:9100'
+    nodes_str = os.getenv('CLUSTER_NODES') or os.getenv('NODES')
+    if not nodes_str or not nodes_str.strip():
+        nodes_str = default_nodes
 
     nodes: List[str] = []
     for node in nodes_str.split(','):

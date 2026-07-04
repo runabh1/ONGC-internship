@@ -2,6 +2,6 @@
     job: node_exporter
   targets:
     # Replace these example values with the IP addresses or hostnames of your own node_exporter targets.
-    - 'YOUR_NODE_IP_1:9100'
-    - 'YOUR_NODE_IP_2:9100'
-    - 'YOUR_NODE_IP_3:9100'
+    - '192.168.56.101:9100'
+    - '192.168.56.102:9100'
+    - '192.168.56.103:9100'
