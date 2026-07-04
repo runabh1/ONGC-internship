@@ -21,9 +21,18 @@ METRIC_QUERIES = {
 }
 
 
+def normalize_instance(instance: str) -> str:
+    if ':' in instance and instance.count(':') == 1:
+        host, port = instance.split(':', 1)
+        if port.isdigit():
+            return host
+    return instance
+
+
 def load_metrics_for(instance: str, query_template: str, hours: int, prometheus_url: str) -> pd.DataFrame:
     client = PrometheusClient(prometheus_url)
-    query = query_template.format(instance=instance)
+    normalized_instance = normalize_instance(instance)
+    query = query_template.format(instance=normalized_instance)
     now = pd.Timestamp.now(tz='UTC')
     start = now - pd.Timedelta(hours=hours)
     df = client.query_range(query=query, start=start.isoformat(), end=now.isoformat(), step='30s')

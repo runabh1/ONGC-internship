@@ -11,9 +11,18 @@ from ml import PrometheusClient
 PROMETHEUS_URL = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
 
 
+def normalize_instance(instance: str) -> str:
+    if ':' in instance and instance.count(':') == 1:
+        host, port = instance.split(':', 1)
+        if port.isdigit():
+            return host
+    return instance
+
+
 def load_metrics(instance: str, metric: str, hours: int, prometheus_url: str) -> pd.DataFrame:
     client = PrometheusClient(prometheus_url)
-    query = f'{metric}{{instance="{instance}"}}'
+    normalized_instance = normalize_instance(instance)
+    query = f'{metric}{{instance="{normalized_instance}"}}'
     now = pd.Timestamp.now(tz='UTC')
     start = now - pd.Timedelta(hours=hours)
     return client.query_range(query=query, start=start.isoformat(), end=now.isoformat(), step='30s')
@@ -30,26 +39,20 @@ def main() -> None:
     hours = st.sidebar.slider('Lookback hours', 1, 24, 3)
 
     # build combined table: CPU %, Memory %, Disk % for the instance
+    normalized_instance = normalize_instance(instance)
     CLIENT = PrometheusClient(prometheus_url)
     now = pd.Timestamp.now(tz='UTC')
     start = now - pd.Timedelta(hours=hours)
     queries = {
-        'CPU': '100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle", instance="%s"}[5m])) * 100)' % instance,
-        'Memory': '100 * (1 - (node_memory_MemAvailable_bytes{instance="%s"} / node_memory_MemTotal_bytes{instance="%s"}))' % (instance, instance),
-        'Disk': '100 * (1 - (node_filesystem_avail_bytes{mountpoint="/", instance="%s"} / node_filesystem_size_bytes{mountpoint="/", instance="%s"}))' % (instance, instance),
+        'CPU': '100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle", instance="%s"}[5m])) * 100)' % normalized_instance,
+        'Memory': '100 * (1 - (node_memory_MemAvailable_bytes{instance="%s"} / node_memory_MemTotal_bytes{instance="%s"}))' % (normalized_instance, normalized_instance),
+        'Disk': '100 * (1 - (node_filesystem_avail_bytes{mountpoint="/", instance="%s"} / node_filesystem_size_bytes{mountpoint="/", instance="%s"}))' % (normalized_instance, normalized_instance),
     }
 
     try:
         df_cpu = CLIENT.query_range(query=queries['CPU'], start=start.isoformat(), end=now.isoformat(), step='30s')
         df_mem = CLIENT.query_range(query=queries['Memory'], start=start.isoformat(), end=now.isoformat(), step='30s')
         df_disk = CLIENT.query_range(query=queries['Disk'], start=start.isoformat(), end=now.isoformat(), step='30s')
-    except RequestException as exc:
-        st.error(f'Cannot connect to Prometheus at {prometheus_url}: {exc}')
-        return
-    except Exception as exc:
-        st.error(str(exc))
-        return
-
     except RequestException as exc:
         st.error(f'Cannot connect to Prometheus at {prometheus_url}: {exc}')
         return

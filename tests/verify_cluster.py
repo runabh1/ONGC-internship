@@ -80,8 +80,8 @@ def check_prometheus_scrape(node: str, prometheus_url: str = None) -> bool:
         prometheus_url = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
     
     try:
-        # Get the instance identifier (host:port format)
-        instance_id = node if ':' in node else f"{node}:9100"
+        # Prometheus instance labels may omit the exporter port.
+        instance_id = node.split(':')[0] if ':' in node else node
         
         # Query Prometheus targets endpoint to check if this node is being scraped
         response = requests.get(
