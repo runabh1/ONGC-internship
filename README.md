@@ -57,6 +57,20 @@ EMAIL_SMTP_SERVER=smtp.gmail.com
 EMAIL_SMTP_PORT=587
 ```
 
+The infra checker page also reads node addresses from `.env` using either `NODES` or `CLUSTER_NODES`.
+
+Use a comma-separated list of hosts, and the app will default to port `9100` when the port is omitted:
+
+```env
+NODES=192.168.56.101,192.168.56.102,192.168.56.103
+```
+
+If you want to be explicit, you can include the port for each host:
+
+```env
+NODES=192.168.56.101:9100,192.168.56.102:9100
+```
+
 > The app will still start without email settings, but email alerts will be disabled.
 
 ## 3. Configure your own node targets
