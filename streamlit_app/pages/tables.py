@@ -7,6 +7,7 @@ import streamlit as st
 from requests.exceptions import RequestException
 
 from ml import PrometheusClient
+from dateutil import tz
 
 PROMETHEUS_URL = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
 
@@ -86,6 +87,14 @@ def main() -> None:
     # simplify for operators
     merged['node'] = instance
     merged = merged.rename(columns={'timestamp': 'time', 'cpu': 'cpu_percent', 'memory': 'memory_percent', 'disk': 'disk_percent'})
+    # convert UTC timestamps to local timezone for operator-friendly display
+    try:
+        local_tz = tz.tzlocal()
+        merged['time'] = pd.to_datetime(merged['time'], utc=True).dt.tz_convert(local_tz)
+        merged['time'] = merged['time'].dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+    except Exception:
+        # fallback: show UTC ISO if conversion fails
+        merged['time'] = pd.to_datetime(merged['time'], utc=True).dt.strftime('%Y-%m-%d %H:%M:%S %Z')
     st.subheader('Operator-friendly table')
     st.dataframe(merged.tail(200).reset_index(drop=True))
 
