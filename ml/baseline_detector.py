@@ -11,8 +11,8 @@ from ml.utils import AnomalyResult, ensure_df_index, rolling_mean, ewma, z_score
 @dataclass
 class RollingMeanDetector:
     metric: str
-    window: int = 3
-    threshold: float = 0.10
+    window: int = 15
+    threshold: float = 0.20
 
     def fit(self, data: pd.DataFrame) -> None:
         # Rolling mean detector does not memorize a model beyond hyperparameters.
@@ -59,8 +59,8 @@ class RollingMeanDetector:
 @dataclass
 class EWMAAnomalyDetector:
     metric: str
-    span: int = 3
-    threshold: float = 0.10
+    span: int = 12
+    threshold: float = 0.20
 
     def fit(self, data: pd.DataFrame) -> None:
         pass
@@ -106,7 +106,7 @@ class EWMAAnomalyDetector:
 @dataclass
 class ZScoreDetector:
     metric: str
-    threshold: float = 1.5
+    threshold: float = 2.5
     fitted_mean: Optional[float] = None
     fitted_std: Optional[float] = None
 
