@@ -271,10 +271,13 @@ def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], 
     worst_severity = worst_node['severity'] if worst_node is not None else 'Normal'
     if worst_severity == 'Critical':
         status = 'Critical'
+        status_reason = 'Worst anomaly severity is Critical in the selected lookback window.'
     elif worst_severity != 'Normal':
         status = 'Degraded'
+        status_reason = f'Cluster is degraded because the worst observed anomaly severity is {worst_severity}.'
     else:
         status = 'Healthy'
+        status_reason = 'No anomalies were detected in the selected lookback window.'
 
     incident_summary = summarize_recent_incidents(anomalies_df)
     history_line = (
@@ -292,7 +295,7 @@ def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], 
     col1, col2, col3, col4 = st.columns([2,1,1,1])
     with col1:
         st.markdown(
-            f"<div class='card'><div class='metric-title'>Cluster status</div><h3>{status}</h3><div>Current cluster status: <b>{current_cluster_status}</b></div><div>AI anomaly score: <b>{max_anomaly_score:.2f}</b></div><div>{history_line}</div><div style='font-size:0.9em;color:#555;margin-top:8px;'>{status_note}</div></div>",
+            f"<div class='card'><div class='metric-title'>Cluster status</div><h3>{status}</h3><div>{status_reason}</div><div>Current cluster status: <b>{current_cluster_status}</b></div><div>AI anomaly score: <b>{max_anomaly_score:.2f}</b></div><div>{history_line}</div><div style='font-size:0.9em;color:#555;margin-top:8px;'>{status_note}</div></div>",
             unsafe_allow_html=True,
         )
     col2.metric('Nodes monitored', len(instances))

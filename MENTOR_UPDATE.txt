@@ -1,0 +1,89 @@
+Project report: full detailed chronological summary
+
+1. Initial analysis and goal definition
+   - User requested recalibration of four anomaly detectors in the app: Rolling Mean, EWMA, Z-Score, and Isolation Forest.
+   - The requirement included keeping the existing consensus/aggregation logic unchanged.
+   - The target was live 3-hour Prometheus lookback data and Docker-based deployment.
+
+2. Code exploration and context gathering
+   - Inspected model implementation files under `ml/`: `baseline_detector.py`, `isolation_forest.py`, `prometheus_client.py`, `utils.py`.
+   - Found Streamlit integration in `streamlit_app/app.py` and page layout under `streamlit_app/pages/`.
+   - Confirmed Docker Compose structure in `docker/docker-compose.yml`, Streamlit Dockerfile in `docker/Dockerfile.streamlit`, and Prometheus/Alertmanager configs in `config/`.
+
+3. Detector recalibration changes
+   - In `ml/baseline_detector.py`:
+     * Rolling Mean detector: window from 3 to 15, threshold from 0.10 to 0.20.
+     * EWMA detector: span from 3 to 12, threshold from 0.10 to 0.20.
+     * Z-Score detector: threshold from 1.5 to 2.5.
+   - In `ml/isolation_forest.py`:
+     * Isolation Forest contamination changed from 0.15 to 0.03.
+   - These changes were intended to reduce false positives and make anomaly detection less sensitive.
+
+4. Regression test creation
+   - Added `tests/test_detector_sensitivity.py` to assert the new detector default values.
+   - Executed the test suite to verify the updated defaults.
+   - The test pass confirmed the recalibration code was correctly applied.
+
+5. Live verification against Prometheus
+   - Queried Prometheus 3-hour CPU metrics by running the app’s Prometheus client logic.
+   - Confirmed that anomalies became less frequent: Rolling Mean and Isolation Forest detected a small number of events while EWMA and Z-Score stayed quiet.
+   - Captured the 3-hour data output and anomaly counts to verify the effect.
+
+6. Docker and deployment issues
+   - The user’s host had Docker Compose setup, but the first `docker compose up` failed because the Docker daemon was not running.
+   - When Docker started, another problem appeared: local Windows `prometheus.exe` had already bound port `9090`, causing the container bind error.
+   - Resolved the port conflict by identifying the local process and freeing the port for Docker.
+
+7. Alertmanager email config fix
+   - Alertmanager failed to start because `config/alertmanager.yml` contained placeholder SMTP values and generated an `invalid URL` error.
+   - Edited `config/alertmanager.yml` to disable email sending and remove invalid SMTP receivers.
+   - After this fix, Alertmanager started cleanly.
+
+8. Streamlit auto-refresh bug fix
+   - The app used `st.rerun()`, which caused runtime errors in the current Streamlit version.
+   - Updated `streamlit_app/app.py` to use supported `st.experimental_rerun()`.
+   - Rebuilt the Streamlit image and restarted the Streamlit container to apply the fix.
+
+9. Timestamp display fix
+   - Identified the timestamp formatting issue in `streamlit_app/pages/tables.py` and `streamlit_app/tables.py`.
+   - Updated `streamlit_app/pages/tables.py` to convert UTC timestamps to local timezone and format them as readable strings.
+   - Updated `streamlit_app/tables.py` to format anomaly timestamps in the display table.
+   - This ensures table rows show correct human-friendly times for the operator.
+
+10. README and documentation update
+   - Replaced the existing `README.md` with a full documentation file.
+   - The new README now includes:
+     * quick Docker and local setup instructions
+     * environment variable usage
+     * Prometheus and Alertmanager configuration guidance
+     * Streamlit app structure and ML detector descriptions
+     * troubleshooting notes and productivity tips
+     * Docker build notes for the heavy TensorFlow dependency.
+   - Added a Mermaid workflow diagram showing how the UI, Prometheus, ML detector layer, and alerting flow interact.
+
+11. Current project status
+   - Code changes are in place for detector recalibration.
+   - Email alerts are disabled by default until SMTP is configured.
+   - Docker Compose services are built and the Streamlit container has been restarted after recent source updates.
+   - The app still needs confirmation by opening `http://localhost:8501` in the browser.
+   - The Streamlit image rebuild is pending for the timestamp fix if the new Docker image has not been fully redeployed.
+
+12. Remaining / recommended actions
+   - Confirm the app in the browser and validate the table timestamp behavior.
+   - Remove `tensorflow-cpu==2.18.1` from `requirements.txt` if TensorFlow is not required, to reduce Docker build time.
+   - Optionally refactor `streamlit_app/pages/infra_checker.py` to avoid importing test modules in runtime pages.
+
+Files changed or added
+- `ml/baseline_detector.py`
+- `ml/isolation_forest.py`
+- `tests/test_detector_sensitivity.py`
+- `ml/prometheus_client.py` (inspected, not changed)
+- `config/alertmanager.yml`
+- `docker/docker-compose.yml`
+- `streamlit_app/app.py`
+- `streamlit_app/pages/tables.py`
+- `streamlit_app/tables.py`
+- `README.md`
+- `MENTOR_UPDATE.txt`
+
+This report covers the project from the initial request through investigation, code changes, deployment debugging, and documentation updates. It also identifies the current status and the remaining validation steps.
