@@ -345,7 +345,7 @@ def render_auto_refresh(auto_refresh: bool) -> None:
     last_refresh = st.session_state.get('last_refresh', 0.0)
     if now - last_refresh >= interval_seconds:
         st.session_state['last_refresh'] = now
-        st.rerun()
+        st.experimental_rerun()
 
 
 def current_value_status(current_value: float) -> str:
