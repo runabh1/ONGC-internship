@@ -4,6 +4,11 @@ from .feature_engineering import add_rolling_features, aggregate_by_instance
 from .isolation_forest import IsolationForestDetector
 from .lstm_detector import LSTMAutoencoderDetector
 from .prometheus_client import PrometheusClient
+from .startup_warmup import (
+    detect_warmup_period,
+    filter_startup_samples,
+    has_sufficient_historical_data,
+)
 from .utils import AnomalyResult
 
 __all__ = [
@@ -17,4 +22,7 @@ __all__ = [
     'add_rolling_features',
     'aggregate_by_instance',
     'explain_anomalies',
+    'detect_warmup_period',
+    'filter_startup_samples',
+    'has_sufficient_historical_data',
 ]

@@ -13,7 +13,16 @@ import plotly.graph_objects as go
 import streamlit as st
 from requests.exceptions import RequestException
 
-from ml import PrometheusClient, explain_anomalies, IsolationForestDetector, RollingMeanDetector, EWMAAnomalyDetector, ZScoreDetector
+from ml import (
+    PrometheusClient,
+    explain_anomalies,
+    IsolationForestDetector,
+    RollingMeanDetector,
+    EWMAAnomalyDetector,
+    ZScoreDetector,
+    detect_warmup_period,
+    filter_startup_samples,
+)
 from ml.feature_engineering import add_rolling_features
 
 PROMETHEUS_URL = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
@@ -98,7 +107,32 @@ def clear_email_alert_history(instance: str) -> None:
             history.pop(key, None)
 
 
-def send_alert_email(instance: str, severity: str, peak_value: float | None, current_value: float | None) -> Tuple[bool, str | None]:
+def send_alert_email(
+    instance: str,
+    severity: str,
+    peak_value: float | None,
+    current_value: float | None,
+    skip_due_to_warmup: bool = False,
+) -> Tuple[bool, str | None]:
+    """
+    Send an email alert for anomalies.
+    
+    Alerts are suppressed during startup warmup period to prevent false positives
+    caused by unstable Prometheus metrics during initialization.
+    
+    Args:
+        instance: Node instance identifier
+        severity: Severity level (Normal, Low, Medium, High, Critical)
+        peak_value: Peak metric value observed in lookback window
+        current_value: Latest metric value
+        skip_due_to_warmup: If True, suppress alert with warmup reason
+    
+    Returns:
+        Tuple of (success: bool, error_message: str | None)
+    """
+    if skip_due_to_warmup:
+        return False, 'Alert suppressed during startup warmup period. System is collecting baseline metrics.'
+    
     if not email_alerts_configured():
         return False, 'Email alerting is not configured.'
 
@@ -121,7 +155,8 @@ def send_alert_email(instance: str, severity: str, peak_value: float | None, cur
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as smtp:
             smtp.starttls()
-            smtp.login(SMTP_USER, SMTP_PASSWORD)
+            # SMTP_USER and SMTP_PASSWORD are guaranteed to be non-None by email_alerts_configured() check above
+            smtp.login(str(SMTP_USER), str(SMTP_PASSWORD))
             smtp.send_message(message)
         return True, None
     except Exception as exc:
@@ -149,20 +184,58 @@ def render_sidebar(instances: list[str]) -> tuple[str, str, int, str, bool]:
     return instance, metric, hours, prometheus_url, auto_refresh
 
 
-def run_detectors(df: pd.DataFrame, metric_name: str, instance: str = None) -> dict[str, Any]:
+def run_detectors(
+    df: pd.DataFrame, metric_name: str, instance: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Run all anomaly detectors on the input data.
+    
+    Preprocessing pipeline:
+    1. Fetch metrics from Prometheus
+    2. Remove startup warm-up samples (handles unreliable rate() calculation)
+    3. Clean dataframe (add rolling features)
+    4. Run all detectors (unchanged)
+    5. Aggregate results
+    6. Generate dashboard score
+    
+    Args:
+        df: DataFrame with metrics (timestamp, instance, value, etc.)
+        metric_name: Name of the metric for detector identification
+        instance: Instance filter ('All nodes' or specific instance name)
+    
+    Returns:
+        Tuple of (results_dict, warmup_info_dict)
+        - results_dict: Anomaly detection results per model
+        - warmup_info_dict: Information about startup warmup period
+    
+    Why startup samples are filtered:
+    - Prometheus rate() requires historical samples to calculate rates correctly
+    - Startup metrics can spike artificially (cache warming, I/O initialization)
+    - Dashboard filters these unreliable samples to prevent false positives
+    - This follows production monitoring best practices
+    """
+    # Apply startup warmup filtering
+    # This removes the first 5 minutes and/or first 10 samples to avoid
+    # startup anomalies caused by rate() calculation and system initialization
+    df_filtered, warmup_info = filter_startup_samples(df, warmup_minutes=5, sample_threshold=10)
+    
+    # Use filtered data for detectors, but preserve original data shape for later display
+    df_for_detection = df_filtered
+    
     # If analyzing all nodes, run detectors per-instance and aggregate
-    if instance == 'All nodes' and 'instance' in df.columns:
-        unique_instances = df['instance'].unique()
+    if instance == 'All nodes' and 'instance' in df_for_detection.columns:
+        unique_instances = df_for_detection['instance'].unique()
         all_results: dict[str, Any] = {}
         
         for inst in unique_instances:
-            inst_df = df[df['instance'] == inst].reset_index(drop=True)
+            inst_df = df_for_detection[df_for_detection['instance'] == inst].reset_index(drop=True)
             if inst_df.empty:
                 continue
-            inst_results = run_detectors(inst_df, metric_name, instance=None)
+            # Recursively call without 'All nodes' to process single instance
+            inst_results, _ = run_detectors(inst_df, metric_name, instance=None)
             all_results[str(inst)] = inst_results
         
-        return all_results
+        return all_results, warmup_info
     
     detectors = {
         'Rolling Mean': RollingMeanDetector(metric=metric_name),
@@ -175,17 +248,17 @@ def run_detectors(df: pd.DataFrame, metric_name: str, instance: str = None) -> d
     for name, detector in detectors.items():
         try:
             if hasattr(detector, 'fit') and name in ['Z Score', 'Isolation Forest']:
-                detector.fit(df)
-            anomalies = detector.predict(df)
+                detector.fit(df_for_detection)
+            anomalies = detector.predict(df_for_detection)
             results[name] = {
-                'summary': detector.explain(df),
+                'summary': detector.explain(df_for_detection),
                 'anomalies': explain_anomalies(anomalies),
-                'score': detector.score(df),
+                'score': detector.score(df_for_detection),
             }
         except Exception as exc:
             results[name] = {'error': str(exc)}
 
-    return results
+    return results, warmup_info
 
 
 def summarize_recent_incidents(anomalies_df: pd.DataFrame) -> dict[str, Any]:
@@ -258,26 +331,64 @@ def compute_node_consensus(results: dict[str, Any], instances: list[str]) -> dic
     return node_consensus
 
 
-def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], anomalies_df: pd.DataFrame) -> None:
+def render_summary(
+    df: pd.DataFrame,
+    metric_name: str,
+    results: dict[str, Any],
+    anomalies_df: pd.DataFrame,
+    warmup_info: dict[str, Any] | None = None,
+) -> None:
+    """
+    Render the cluster summary with current and historical status.
+    
+    Improvements:
+    - Shows current CPU status separately from historical anomaly analysis
+    - During startup warmup, displays "Collecting baseline..." and defers analysis
+    - Explains why current and historical may differ
+    
+    Args:
+        df: DataFrame with all metrics
+        metric_name: Name of the metric being analyzed
+        results: Anomaly detection results per model
+        anomalies_df: DataFrame with detected anomalies
+        warmup_info: Startup warmup status info from filter_startup_samples()
+    """
     st.markdown(_STYLES, unsafe_allow_html=True)
     instances = sorted(df['instance'].unique().tolist())
     latest = df.sort_values('timestamp').groupby('instance').tail(1)
     avg_value = float(df['value'].mean()) if not df.empty else 0.0
+
+    # Handle warmup period UI
+    in_warmup: bool = bool(warmup_info and warmup_info.get('in_warmup', False)) if warmup_info else False
+    if in_warmup and warmup_info:
+        st.warning(
+            f"🔄 **Collecting baseline...** {warmup_info.get('reason', 'System initializing.')}\n\n"
+            "The anomaly detection models are warming up and collecting initial metrics. "
+            "Critical alerts are disabled during this period to prevent false positives from startup spikes. "
+            f"Estimated warmup end: {warmup_info.get('warmup_end_time', 'pending')}"
+        )
 
     node_consensus = compute_node_consensus(results, instances)
     max_anomaly_score = max((info['confidence'] for info in node_consensus.values()), default=0.0)
     severity_rank = {'Normal': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
     worst_node = max(node_consensus.values(), key=lambda info: severity_rank.get(info['severity'], 0)) if node_consensus else None
     worst_severity = worst_node['severity'] if worst_node is not None else 'Normal'
+    
+    # Determine historical status (based on anomaly detection over lookback window)
     if worst_severity == 'Critical':
-        status = 'Critical'
-        status_reason = 'Worst anomaly severity is Critical in the selected lookback window.'
+        historical_status = 'Critical'
+        historical_reason = 'Worst anomaly severity is Critical in the selected lookback window.'
     elif worst_severity != 'Normal':
-        status = 'Degraded'
-        status_reason = f'Cluster is degraded because the worst observed anomaly severity is {worst_severity}.'
+        historical_status = 'Degraded'
+        historical_reason = f'Cluster is degraded because the worst observed anomaly severity is {worst_severity}.'
     else:
-        status = 'Healthy'
-        status_reason = 'No anomalies were detected in the selected lookback window.'
+        historical_status = 'Healthy'
+        historical_reason = 'No anomalies were detected in the selected lookback window.'
+
+    # Get current status (based only on latest metric values)
+    latest_statuses = [current_value_status(float(row['value'])) for _, row in latest.iterrows()] if not latest.empty else []
+    current_severity_rank = {'Normal': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
+    current_cluster_status = max(latest_statuses, key=lambda s: current_severity_rank.get(s, 0)) if latest_statuses else 'Normal'
 
     incident_summary = summarize_recent_incidents(anomalies_df)
     history_line = (
@@ -286,18 +397,34 @@ def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], 
         else 'Last 1h: No incidents detected.'
     )
 
-    latest_statuses = [current_value_status(float(row['value'])) for _, row in latest.iterrows()] if not latest.empty else []
-    current_severity_rank = {'Normal': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Critical': 4}
-    current_cluster_status = max(latest_statuses, key=lambda s: current_severity_rank.get(s, 0)) if latest_statuses else 'Normal'
-    status_note = 'Cluster status reflects the worst incident observed within the selected lookback window, not necessarily current live values.'
-
-    # Summary cards
-    col1, col2, col3, col4 = st.columns([2,1,1,1])
+    # Summary cards: Separate CURRENT status from HISTORICAL analysis
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
+        # Two-part status: current vs historical
+        current_section = f"<div style='margin-bottom:12px;'><div style='font-size:0.9em;color:#666;'>Current CPU Status</div><h4 style='margin:4px 0;'>{current_cluster_status}</h4></div>"
+        historical_section = f"<div><div style='font-size:0.9em;color:#666;'>Historical AI Analysis</div><h4 style='margin:4px 0;'>{historical_status}</h4><div style='font-size:0.85em;'>{historical_reason}</div></div>"
+        
+        warmup_note = "<div style='margin-top:8px; padding:8px; background:#fff3cd; border-left:4px solid #ffc107; font-size:0.85em;'>⏳ Baseline collection active — alerts disabled</div>" if in_warmup else ""
+        
+        explanation = (
+            "<div style='margin-top:12px; padding:8px; background:#f0f4f8; border-radius:4px; font-size:0.85em;'>"
+            "<b>Why they differ:</b> Current status shows live metrics (latest value). "
+            "Historical analysis shows anomalies detected over your selected lookback window using AI models."
+            "</div>"
+        )
+        
         st.markdown(
-            f"<div class='card'><div class='metric-title'>Cluster status</div><h3>{status}</h3><div>{status_reason}</div><div>Current cluster status: <b>{current_cluster_status}</b></div><div>AI anomaly score: <b>{max_anomaly_score:.2f}</b></div><div>{history_line}</div><div style='font-size:0.9em;color:#555;margin-top:8px;'>{status_note}</div></div>",
+            f"<div class='card'>"
+            f"{current_section}"
+            f"{historical_section}"
+            f"{warmup_note}"
+            f"<div style='margin-top:8px;'>AI anomaly score: <b>{max_anomaly_score:.2f}</b></div>"
+            f"<div>{history_line}</div>"
+            f"{explanation}"
+            f"</div>",
             unsafe_allow_html=True,
         )
+    
     col2.metric('Nodes monitored', len(instances))
     col3.metric('Metric', metric_name)
     col4.metric('Average CPU across cluster', f'{avg_value:.2f}')
@@ -308,7 +435,7 @@ def render_summary(df: pd.DataFrame, metric_name: str, results: dict[str, Any], 
     st.markdown('---')
 
     # Per-node health cards (show latest metric per node)
-    st.markdown('**Per-node summary**')
+    st.markdown('**Per-node summary (Current values)**')
     node_cols = st.columns(len(instances) if len(instances) <= 4 else 4)
     idx = 0
     latest_by_instance = latest.set_index('instance') if not latest.empty else None
@@ -348,7 +475,7 @@ def render_auto_refresh(auto_refresh: bool) -> None:
     last_refresh = st.session_state.get('last_refresh', 0.0)
     if now - last_refresh >= interval_seconds:
         st.session_state['last_refresh'] = now
-        st.experimental_rerun()
+        st.rerun()
 
 
 def current_value_status(current_value: float) -> str:
@@ -363,10 +490,31 @@ def current_value_status(current_value: float) -> str:
     return 'Normal'
 
 
-def render_consensus(results: dict[str, Any], latest_values: dict[str, float]) -> None:
+def render_consensus(
+    results: dict[str, Any],
+    latest_values: dict[str, float],
+    warmup_info: dict[str, Any] | None = None,
+) -> None:
+    """
+    Render per-node anomaly consensus.
+    
+    Improvements:
+    - Skips email alerts during startup warmup period
+    - Explains that severity reflects peak values, not current status
+    
+    Args:
+        results: Anomaly detection results from all models
+        latest_values: Latest metric values per instance
+        warmup_info: Startup warmup status (alerts disabled if in_warmup=True)
+    """
     # Build consensus across models per instance
     st.markdown('### ML Consensus')
     st.markdown('_Severity reflects the peak CPU value observed within the selected lookback window, not the current live value._')
+    
+    in_warmup: bool = bool(warmup_info and warmup_info.get('in_warmup', False)) if warmup_info else False
+    if in_warmup:
+        st.info("⏳ Email alerts are disabled during baseline collection to prevent false positives.")
+    
     # collect anomalies per model per instance
     per_instance_votes: dict[str, list[str]] = {}
     per_instance_values: dict[str, list[float]] = {}
@@ -413,14 +561,23 @@ def render_consensus(results: dict[str, Any], latest_values: dict[str, float]) -
         st.progress(confidence)
         if peak_value is not None:
             st.markdown(f"Peak CPU observed: {peak_value:.2f}%")
+        
+        # Send email alert, but skip if in warmup period
         if severity == 'Critical' and should_send_email_alert(inst, severity):
-            success, error = send_alert_email(inst, severity, peak_value, current_value)
+            success, error = send_alert_email(
+                inst,
+                severity,
+                peak_value,
+                current_value,
+                skip_due_to_warmup=in_warmup,
+            )
             if success:
                 record_email_alert_sent(inst, severity)
                 st.success(f'Email alert sent for {inst} (Critical).')
-            else:
+            elif error and 'warmup' not in error.lower():
                 st.error(f'Failed to send email alert for {inst}: {error}')
                 st.session_state['email_alert_errors'].append(f'{inst}: {error}')
+        
         if severity == 'Low' and peak_value is not None and peak_value < 30:
             st.info('Severity is set to Low because the detected peak CPU is below 30%, even though models agreed on an anomaly.')
         st.markdown(f"Confidence: {pct}% — Models: {', '.join(sorted(set(voters)))}")
@@ -563,7 +720,9 @@ def main() -> None:
 
     init_alert_session_state()
     df = add_rolling_features(df)
-    results = run_detectors(df, selected_metric, instance)
+    
+    # Run detectors and capture warmup info
+    results, warmup_info = run_detectors(df, selected_metric, instance)
     
     # Normalize results structure: if per-instance, convert to model-centric format
     if instance == 'All nodes' and 'instance' in df.columns and isinstance(results, dict):
@@ -607,8 +766,9 @@ def main() -> None:
     if not anomalies_df.empty and 'timestamp' in anomalies_df.columns:
         anomalies_df['timestamp'] = pd.to_datetime(anomalies_df['timestamp'], utc=True)
 
-    render_summary(df, selected_metric, results, anomalies_df)
-    render_consensus(results, latest_values)
+    # Render UI with warmup info passed for proper status display and alert handling
+    render_summary(df, selected_metric, results, anomalies_df, warmup_info=warmup_info)
+    render_consensus(results, latest_values, warmup_info=warmup_info)
     render_chart(df, selected_metric, anomalies=anomalies_df)
     render_individual_node_charts(df, selected_metric, anomalies=anomalies_df)
     render_ml_insights(results)
