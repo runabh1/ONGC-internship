@@ -1,6 +1,11 @@
 from .baseline_detector import EWMAAnomalyDetector, RollingMeanDetector, ZScoreDetector
 from .explain import explain_anomalies
 from .feature_engineering import add_rolling_features, aggregate_by_instance
+from .incident_manager import (
+    Incident,
+    IncidentManager,
+    calculate_recovery_percentage,
+)
 from .isolation_forest import IsolationForestDetector
 from .lstm_detector import LSTMAutoencoderDetector
 from .prometheus_client import PrometheusClient
@@ -25,4 +30,7 @@ __all__ = [
     'detect_warmup_period',
     'filter_startup_samples',
     'has_sufficient_historical_data',
+    'Incident',
+    'IncidentManager',
+    'calculate_recovery_percentage',
 ]
