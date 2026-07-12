@@ -2,6 +2,12 @@
 
 Comprehensive monitoring stack that combines Prometheus for metrics collection, a Streamlit dashboard for visualization and operator interaction, and a small ML layer for anomaly detection (rolling mean, EWMA, Z-score, Isolation Forest). The project is designed to run locally via Docker Compose for demos and can also be run in a development environment.
 
+## Recent updates
+
+- New functions: added rolling-feature engineering helpers, instance-level aggregation, startup warmup detection and filtering, incident lifecycle management, recovery percentage calculation, and anomaly explanation formatting.
+- New metrics: the dashboard now surfaces CPU utilization, memory availability, load average, and CPU counter metrics, along with derived values such as rolling mean/EWMA/z-score, detector scores, consensus confidence, peak/current values, and recovery status.
+- New dashboard capabilities: the Streamlit experience now includes richer multi-page monitoring with alert summaries, charts, tables, infrastructure checks, auto-refresh, threshold-based health cards, detector filters, local-time incident views, and configurable email alerts.
+
 ## Quick overview
 
 - Prometheus: scrapes `node_exporter` targets and stores time-series metrics.

@@ -23,3 +23,7 @@ TEST_REPORT.md
 *.hdf5
 *.tmp
 *.temp
+
+# Avoid copying OneDrive-backed model artifacts into the Docker build context.
+# These can be recreated at runtime if needed.
+ml/models/

@@ -23,6 +23,30 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 
+def classify_severity(
+    confidence: float,
+    peak_value: float | None,
+    duration_seconds: float,
+    num_nodes: int,
+) -> str:
+    """Return a consistent severity label for anomaly incidents.
+
+    This is the shared source of truth used by incident management and the
+    Streamlit UI so the alerts and ML consensus pages cannot disagree.
+    """
+    peak = float(peak_value or 0.0)
+
+    if confidence > 0.75 and peak >= 90.0:
+        if duration_seconds < 300.0:
+            return 'Medium'
+        return 'High' if peak >= 95.0 else 'Medium'
+    if confidence > 0.5 and peak >= 70.0:
+        return 'Medium'
+    if confidence > 0.25 or peak >= 50.0:
+        return 'Low'
+    return 'Normal'
+
+
 @dataclass
 class Incident:
     """Represents a complete incident lifecycle in the monitoring system."""
@@ -215,6 +239,7 @@ class IncidentManager:
             is_startup_event=is_startup,
             status='Active',
             description='',
+            
         )
         
         self.active_incidents[incident_id] = incident
@@ -307,30 +332,11 @@ class IncidentManager:
         duration_seconds: float,
         num_nodes: int,
     ) -> str:
-        """
-        Classify incident severity based on multiple factors.
-        
-        Args:
-            confidence: Model consensus confidence (0-1)
-            peak_value: Peak CPU percentage
-            duration_seconds: Incident duration in seconds
-            num_nodes: Number of affected nodes
-        
-        Returns:
-            Severity level: 'Healthy', 'Low', 'Medium', 'High', 'Critical'
-        """
-        # Startup events are lower severity
-        if confidence > 0.75 and peak_value >= 90:
-            if duration_seconds < 300:  # Less than 5 minutes
-                return 'Medium'
-            return 'High' if peak_value >= 95 else 'Medium'
-        elif confidence > 0.5 and peak_value >= 70:
-            return 'Medium'
-        elif confidence > 0.25 or peak_value >= 50:
-            return 'Low'
-        
-        return 'Healthy'
+        """Delegate to the shared severity classifier."""
+        return classify_severity(confidence, peak_value, duration_seconds, num_nodes)
     
+    
+
     def generate_explanation(
         self,
         incident: Incident,

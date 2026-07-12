@@ -3,16 +3,38 @@ from __future__ import annotations
 import datetime
 import os
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 from requests.exceptions import RequestException
 
-from ml import PrometheusClient, explain_anomalies, IsolationForestDetector, RollingMeanDetector, EWMAAnomalyDetector, ZScoreDetector
+from ml import (
+    PrometheusClient,
+    explain_anomalies,
+    IsolationForestDetector,
+    RollingMeanDetector,
+    EWMAAnomalyDetector,
+    ZScoreDetector,
+    classify_severity,
+)
 from ml.feature_engineering import add_rolling_features
 
 
 PROMETHEUS_URL = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
+IST_TZ = ZoneInfo('Asia/Kolkata')
+
+
+def format_ist_time(value: Any) -> str:
+    if value is None:
+        return '-'
+    if hasattr(value, 'to_pydatetime'):
+        value = value.to_pydatetime()
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return value.astimezone(IST_TZ).strftime('%Y-%m-%d %H:%M IST')
+    return str(value)
 
 
 def build_alerts(prometheus_url: str, hours: int = 1) -> list[dict[str, Any]]:
@@ -46,7 +68,7 @@ def build_alerts(prometheus_url: str, hours: int = 1) -> list[dict[str, Any]]:
                             'model': type(d).__name__.replace('Detector', ''),
                             'score': float(p.score),
                             'timestamp': ts,
-                            'local_timestamp': ts.tz_convert(datetime.datetime.now().astimezone().tzinfo),
+                            'local_timestamp': ts.astimezone(IST_TZ),
                             'details': p.details or {},
                             'value': p.details.get('value') if isinstance(p.details, dict) and 'value' in p.details else None,
                         })
@@ -103,14 +125,8 @@ def build_alerts(prometheus_url: str, hours: int = 1) -> list[dict[str, Any]]:
         votes = len(models)
         confidence = votes / total_models
         avg_score = float(sum(incident['scores']) / len(incident['scores'])) if incident['scores'] else 0.0
-        if confidence > 0.75:
-            sev = 'Critical'
-        elif confidence > 0.5:
-            sev = 'High'
-        elif confidence > 0.25:
-            sev = 'Medium'
-        else:
-            sev = 'Low'
+        peak_value = max(incident['values']) if incident['values'] else None
+        sev = classify_severity(confidence, peak_value, float((incident['end'] - incident['start']).total_seconds()), 1)
 
         consolidated.append({
             'instance': incident['instance'],
@@ -190,9 +206,9 @@ def main() -> None:
         sev = row['severity']
         if sev == 'Low':
             continue
-        start_local = row['start'].tz_convert(datetime.datetime.now().astimezone().tzinfo)
-        end_local = row['end'].tz_convert(datetime.datetime.now().astimezone().tzinfo)
-        title = f"{emoji.get(sev, '')} {sev} — Node: {row['instance']} — {start_local.strftime('%Y-%m-%d %H:%M %Z')} to {end_local.strftime('%H:%M %Z')}"
+        start_local = row['start'].astimezone(IST_TZ)
+        end_local = row['end'].astimezone(IST_TZ)
+        title = f"{emoji.get(sev, '')} {sev} — Node: {row['instance']} — {start_local.strftime('%Y-%m-%d %H:%M IST')} to {end_local.strftime('%H:%M IST')}"
         st.markdown(f"**{title}**")
         if row.get('peak_value') is not None:
             try:

@@ -24,16 +24,19 @@ class RollingMeanDetector:
         rolling = series.rolling(window=self.window, min_periods=1).median()
         results: List[AnomalyResult] = []
         for ts, instance, value, baseline in zip(df.index, df['instance'], series, rolling):
-            deviation = abs(value - baseline) / (baseline if baseline != 0 else 1)
-            is_anomaly = deviation >= self.threshold
+            if baseline == 0.0:
+                deviation = 0.0
+            else:
+                deviation = (value - baseline) / baseline
+            is_anomaly = value > baseline and deviation >= self.threshold
             results.append(
                 AnomalyResult(
                     timestamp=ts,
                     instance=str(instance),
                     metric=self.metric,
-                    score=float(deviation),
+                    score=float(abs(deviation)),
                     is_anomaly=is_anomaly,
-                    reason='robust rolling median deviation' if is_anomaly else 'normal',
+                    reason='upward rolling median deviation' if is_anomaly else 'normal',
                     details={
                         'value': float(value),
                         'baseline': float(baseline),
@@ -71,16 +74,19 @@ class EWMAAnomalyDetector:
         ewma_series = ewma(series, span=self.span)
         results: List[AnomalyResult] = []
         for ts, instance, value, expected in zip(df.index, df['instance'], series, ewma_series):
-            deviation = abs(value - expected) / (expected if expected != 0 else 1)
-            is_anomaly = deviation >= self.threshold
+            if expected == 0.0:
+                deviation = 0.0
+            else:
+                deviation = (value - expected) / expected
+            is_anomaly = value > expected and deviation >= self.threshold
             results.append(
                 AnomalyResult(
                     timestamp=ts,
                     instance=str(instance),
                     metric=self.metric,
-                    score=float(deviation),
+                    score=float(abs(deviation)),
                     is_anomaly=is_anomaly,
-                    reason='short-span ewma deviation' if is_anomaly else 'normal',
+                    reason='upward ewma deviation' if is_anomaly else 'normal',
                     details={
                         'value': float(value),
                         'ewma': float(expected),
@@ -114,30 +120,30 @@ class ZScoreDetector:
         df = ensure_df_index(data, 'timestamp')
         values = df['value'].astype(float)
         self.fitted_mean = float(values.median())
-        self.fitted_std = float((values - values.median()).abs().median() * 1.4826)
+        self.fitted_std = float(max((values - values.median()).abs().median() * 1.4826, 1.0))
 
     def predict(self, data: pd.DataFrame) -> List[AnomalyResult]:
         df = ensure_df_index(data, 'timestamp')
         values = df['value'].astype(float)
-        mad = (values - values.median()).abs().median()
-        zscores = (values - values.median()) / (mad if mad != 0 else 1)
+        mad = max((values - values.median()).abs().median() * 1.4826, 1.0)
+        zscores = (values - values.median()) / mad
         results: List[AnomalyResult] = []
         for ts, instance, value, score in zip(df.index, df['instance'], df['value'], zscores):
-            is_anomaly = abs(score) >= self.threshold
+            is_anomaly = score >= self.threshold
             results.append(
                 AnomalyResult(
                     timestamp=ts,
                     instance=str(instance),
                     metric=self.metric,
-                    score=float(abs(score)),
+                    score=float(max(score, 0.0)),
                     is_anomaly=is_anomaly,
-                    reason='robust z-score anomaly' if is_anomaly else 'normal',
+                    reason='positive z-score anomaly' if is_anomaly else 'normal',
                     details={
                         'value': float(value),
                         'zscore': float(score),
                         'threshold': self.threshold,
                         'median': self.fitted_mean,
-                        'mad': self.fitted_std,
+                        'mad': mad,
                     },
                 )
             )

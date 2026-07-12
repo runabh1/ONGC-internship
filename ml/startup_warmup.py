@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 
 def has_sufficient_historical_data(
@@ -77,42 +78,30 @@ def detect_warmup_period(
     df: pd.DataFrame,
     warmup_minutes: int = 5,
     sample_threshold: int = 10,
-) -> dict[str, bool | int]:
+) -> dict[str, Any]:
     """
     Detect if collected metrics are in a startup warmup period.
-    
+
     The warmup period is determined by either:
-    1. Time-based: First N minutes after earliest timestamp
-    2. Sample-based: First M samples collected
-    
-    Returns whichever is MORE PERMISSIVE (i.e., the larger period).
-    This ensures we don't prematurely exit warmup.
-    
-    Args:
-        df: DataFrame with metrics containing 'timestamp' and optional 'instance'
-        warmup_minutes: Number of minutes from start to consider as warmup (default 5)
-        sample_threshold: Minimum samples before considering warmup complete (default 10)
-    
-    Returns:
-        Dict with:
-        - 'in_warmup': True if system is in warmup period, False otherwise
-        - 'warmup_end_time': Datetime when warmup period ends (UTC)
-        - 'samples_collected': Number of samples collected
-        - 'reason': String explaining why we're in/out of warmup
-    
-    Why: After Prometheus/system startup, the rate() function needs time to
-    accumulate samples. Initial metrics can be unstable. Following production
-    monitoring practices, we ignore these early samples.
+    1. Time-based: First N minutes after earliest timestamp for each instance
+    2. Sample-based: First M samples collected for each instance
+
+    If multiple instances are present, warmup is considered active if any
+    instance still has insufficient history.
     """
     if df.empty:
         return {
             'in_warmup': True,
             'warmup_end_time': None,
             'samples_collected': 0,
+            'sample_threshold': sample_threshold,
+            'warmup_minutes': warmup_minutes,
+            'samples_remaining': sample_threshold,
+            'time_remaining_seconds': 0.0,
             'reason': 'No data collected yet - in initial warmup',
+            'instance_infos': {},
         }
-    
-    # Ensure timestamp is datetime
+
     try:
         df_copy = df.copy()
         if not pd.api.types.is_datetime64_any_dtype(df_copy['timestamp']):
@@ -122,41 +111,105 @@ def detect_warmup_period(
             'in_warmup': True,
             'warmup_end_time': None,
             'samples_collected': len(df),
+            'sample_threshold': sample_threshold,
+            'warmup_minutes': warmup_minutes,
+            'samples_remaining': max(0, sample_threshold - len(df)),
+            'time_remaining_seconds': 0.0,
             'reason': 'Could not parse timestamps - assuming warmup for safety',
+            'instance_infos': {},
         }
-    
-    earliest_ts = df_copy['timestamp'].min()
-    latest_ts = df_copy['timestamp'].max()
-    num_samples = len(df_copy)
-    
-    # Time-based warmup end
-    time_based_warmup_end = earliest_ts + pd.Timedelta(minutes=warmup_minutes)
-    
-    # Sample-based warmup end: when sample_threshold is reached
-    sample_based_in_warmup = num_samples < sample_threshold
-    
-    # Determine overall warmup status: use time OR sample threshold, whichever is more permissive
-    time_based_in_warmup = latest_ts < time_based_warmup_end
-    in_warmup = time_based_in_warmup or sample_based_in_warmup
-    
-    # Warmup ends at the LATER of (time_based_end, whenever sample_threshold is reached)
-    warmup_end_time = time_based_warmup_end
-    
-    if in_warmup:
-        if time_based_in_warmup and sample_based_in_warmup:
-            reason = f'Warmup period active: Only {num_samples} samples collected (need {sample_threshold}), and {warmup_minutes}min elapsed time not reached'
-        elif time_based_in_warmup:
-            reason = f'Warmup period active: {warmup_minutes}min threshold not yet passed (elapsed: {(latest_ts - earliest_ts).total_seconds() / 60:.1f}min)'
+
+    if 'instance' not in df_copy.columns:
+        earliest_ts = df_copy['timestamp'].min()
+        latest_ts = df_copy['timestamp'].max()
+        num_samples = len(df_copy)
+        time_based_warmup_end = earliest_ts + pd.Timedelta(minutes=warmup_minutes)
+        sample_based_in_warmup = num_samples < sample_threshold
+        time_based_in_warmup = latest_ts < time_based_warmup_end
+        in_warmup = time_based_in_warmup or sample_based_in_warmup
+        warmup_end_time = time_based_warmup_end
+        if in_warmup:
+            if time_based_in_warmup and sample_based_in_warmup:
+                reason = (
+                    f'Warmup period active: Only {num_samples} samples collected (need {sample_threshold}), '
+                    f'and {warmup_minutes}min elapsed time not reached'
+                )
+            elif time_based_in_warmup:
+                reason = (
+                    f'Warmup period active: {warmup_minutes}min threshold not yet passed '
+                    f'(elapsed: {(latest_ts - earliest_ts).total_seconds() / 60:.1f}min)'
+                )
+            else:
+                reason = f'Warmup period active: Only {num_samples} samples collected (need {sample_threshold})'
         else:
-            reason = f'Warmup period active: Only {num_samples} samples collected (need {sample_threshold})'
+            reason = 'Warmup period complete - sufficient data accumulated for reliable anomaly detection'
+
+        samples_remaining = max(0, sample_threshold - num_samples)
+        time_remaining = max(0.0, (warmup_end_time - latest_ts).total_seconds()) if warmup_end_time and latest_ts < warmup_end_time else 0.0
+        return {
+            'in_warmup': in_warmup,
+            'warmup_end_time': warmup_end_time,
+            'samples_collected': num_samples,
+            'sample_threshold': sample_threshold,
+            'warmup_minutes': warmup_minutes,
+            'samples_remaining': samples_remaining,
+            'time_remaining_seconds': time_remaining,
+            'reason': reason,
+            'instance_infos': {},
+        }
+
+    instance_infos: dict[str, dict[str, Any]] = {}
+    active_instances: list[str] = []
+    all_end_times: list[pd.Timestamp] = []
+    total_samples = 0
+    total_samples_remaining = 0
+
+    for inst, group in df_copy.groupby('instance', sort=False):
+        group = group.sort_values('timestamp').reset_index(drop=True)
+        earliest_ts = group['timestamp'].min()
+        latest_ts = group['timestamp'].max()
+        num_samples = len(group)
+        total_samples += num_samples
+
+        time_based_warmup_end = earliest_ts + pd.Timedelta(minutes=warmup_minutes)
+        sample_based_in_warmup = num_samples < sample_threshold
+        time_based_in_warmup = latest_ts < time_based_warmup_end
+        inst_in_warmup = time_based_in_warmup or sample_based_in_warmup
+
+        samples_remaining = max(0, sample_threshold - num_samples)
+        time_remaining = max(0.0, (time_based_warmup_end - latest_ts).total_seconds()) if latest_ts < time_based_warmup_end else 0.0
+
+        instance_infos[str(inst)] = {
+            'in_warmup': inst_in_warmup,
+            'warmup_end_time': time_based_warmup_end,
+            'samples_collected': num_samples,
+            'samples_remaining': samples_remaining,
+            'time_remaining_seconds': time_remaining,
+        }
+
+        if inst_in_warmup:
+            active_instances.append(str(inst))
+            total_samples_remaining += samples_remaining
+
+        all_end_times.append(time_based_warmup_end)
+
+    in_warmup = bool(active_instances)
+    warmup_end_time = max(all_end_times) if all_end_times else None
+    if in_warmup:
+        reason = f'Warmup active for instances: {", ".join(active_instances)}'
     else:
         reason = 'Warmup period complete - sufficient data accumulated for reliable anomaly detection'
-    
+
     return {
         'in_warmup': in_warmup,
         'warmup_end_time': warmup_end_time,
-        'samples_collected': num_samples,
+        'samples_collected': total_samples,
+        'sample_threshold': sample_threshold,
+        'warmup_minutes': warmup_minutes,
+        'samples_remaining': total_samples_remaining,
+        'time_remaining_seconds': max((info['time_remaining_seconds'] for info in instance_infos.values()), default=0.0),
         'reason': reason,
+        'instance_infos': instance_infos,
     }
 
 
@@ -164,7 +217,7 @@ def filter_startup_samples(
     df: pd.DataFrame,
     warmup_minutes: int = 5,
     sample_threshold: int = 10,
-) -> tuple[pd.DataFrame, dict[str, bool | int]]:
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
     Remove unreliable startup samples from metrics data.
     
@@ -193,8 +246,7 @@ def filter_startup_samples(
     if df.empty:
         warmup_info = detect_warmup_period(df, warmup_minutes, sample_threshold)
         return df, warmup_info
-    
-    # Ensure timestamp is datetime
+
     try:
         df_copy = df.copy()
         if not pd.api.types.is_datetime64_any_dtype(df_copy['timestamp']):
@@ -204,32 +256,55 @@ def filter_startup_samples(
             'in_warmup': True,
             'warmup_end_time': None,
             'samples_collected': len(df),
+            'sample_threshold': sample_threshold,
+            'warmup_minutes': warmup_minutes,
+            'samples_remaining': max(0, sample_threshold - len(df)),
+            'time_remaining_seconds': 0.0,
             'reason': 'Could not parse timestamps - no filtering applied',
             'filtered_out': 0,
+            'instance_infos': {},
         }
-    
-    # Check if historical data is sufficient - if so, skip warmup entirely
+
     if has_sufficient_historical_data(df_copy):
         warmup_info = detect_warmup_period(df_copy, warmup_minutes, sample_threshold)
         warmup_info['skipped_warmup_due_to_historical_data'] = True
         warmup_info['filtered_out'] = 0
         return df, warmup_info
-    
-    earliest_ts = df_copy['timestamp'].min()
-    warmup_end_time = earliest_ts + pd.Timedelta(minutes=warmup_minutes)
-    
-    # Filter: keep only samples after warmup period AND after first sample_threshold samples
-    filtered_df = df_copy[
-        (df_copy['timestamp'] >= warmup_end_time) &
-        (df_copy.index >= sample_threshold)
-    ].reset_index(drop=True)
-    
-    filtered_out = len(df) - len(filtered_df)
-    
+
+    filtered_rows = []
+    all_filtered_out = 0
+    instance_infos: dict[str, dict[str, Any]] = {}
+
+    for inst, group in df_copy.groupby('instance', sort=False):
+        group = group.sort_values('timestamp').reset_index(drop=True)
+        earliest_ts = group['timestamp'].min()
+        warmup_end_time = earliest_ts + pd.Timedelta(minutes=warmup_minutes)
+        keep_mask = (group['timestamp'] >= warmup_end_time) & (group.index >= sample_threshold)
+        filtered_group = group[keep_mask].reset_index(drop=True)
+        filtered_rows.append(filtered_group)
+        filtered_out = len(group) - len(filtered_group)
+        all_filtered_out += filtered_out
+
+        samples_collected = len(group)
+        samples_remaining = max(0, sample_threshold - samples_collected)
+        time_remaining = max(0.0, (warmup_end_time - group['timestamp'].max()).total_seconds()) if group['timestamp'].max() < warmup_end_time else 0.0
+
+        instance_infos[str(inst)] = {
+            'filtered_out': filtered_out,
+            'samples_collected': samples_collected,
+            'samples_remaining': samples_remaining,
+            'warmup_end_time': warmup_end_time,
+            'time_remaining_seconds': time_remaining,
+            'in_warmup': (samples_remaining > 0 or time_remaining > 0),
+        }
+
+    filtered_df = pd.concat(filtered_rows, ignore_index=True) if filtered_rows else pd.DataFrame(columns=df_copy.columns)
+
     warmup_info = detect_warmup_period(df_copy, warmup_minutes, sample_threshold)
-    warmup_info['filtered_out'] = filtered_out
-    
-    if filtered_out > 0:
-        warmup_info['reason'] += f' — Filtered out {filtered_out} startup samples'
-    
+    warmup_info['filtered_out'] = all_filtered_out
+    warmup_info['instance_infos'] = instance_infos
+
+    if all_filtered_out > 0:
+        warmup_info['reason'] += f' — Filtered out {all_filtered_out} startup samples'
+
     return filtered_df, warmup_info

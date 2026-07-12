@@ -6,11 +6,13 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Tuple
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 from requests.exceptions import RequestException
 
 from ml import (
@@ -25,10 +27,42 @@ from ml import (
     Incident,
     IncidentManager,
     calculate_recovery_percentage,
+    classify_severity,
 )
 from ml.feature_engineering import add_rolling_features
 
 PROMETHEUS_URL = os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
+
+# Record app process start time so we can show a baseline collection banner
+APP_START_TIME = datetime.now(timezone.utc)
+IST_TZ = ZoneInfo('Asia/Kolkata')
+
+
+def format_ist_time(value: Any, fmt: str = '%H:%M IST') -> str:
+    """Format a datetime-like value in Indian Standard Time."""
+    if value is None:
+        return '-'
+
+    if hasattr(value, 'to_pydatetime'):
+        value = value.to_pydatetime()
+    elif isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
+
+    if isinstance(value, str):
+        try:
+            value = pd.to_datetime(value, utc=True).to_pydatetime()
+        except Exception:
+            return str(value)
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        value = value.astimezone(IST_TZ)
+        return value.strftime(fmt)
+
+    return str(value)
+
+
 METRIC_OPTIONS: dict[str, str] = {
     'CPU utilization (%)': '100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)',
     'Load 1m': 'node_load1',
@@ -211,6 +245,25 @@ def current_value_status(current_value: float, metric_name: str) -> str:
     return status_map.get(status, 'Normal')
 
 
+def get_consensus_state(
+    votes: int,
+    current_value: float | None,
+    metric_name: str,
+    recovery_threshold: float = 50.0,
+) -> tuple[str, str, str]:
+    """Determine ML consensus state and decision text."""
+    current_is_normal = current_value is not None and current_value < recovery_threshold
+    current_health, _ = classify_health(current_value or 0.0, metric_name)
+
+    if votes >= 3 and current_health in ['High', 'Critical']:
+        return 'Active', 'Active CPU Spike', 'Active'
+    if votes > 0 and current_is_normal:
+        return 'Recovered', 'CPU Spike Recovered', 'Recovered'
+    if votes > 0:
+        return 'Active', 'Active CPU Spike', 'Active'
+    return 'Healthy', 'No anomaly detected', 'Healthy'
+
+
 SMTP_SERVER = os.getenv('EMAIL_SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT = int(os.getenv('EMAIL_SMTP_PORT', '587'))
 SMTP_USER = os.getenv('EMAIL_USER')
@@ -371,7 +424,9 @@ def load_metrics(metric_query: str, prometheus_url: str, hours: int) -> pd.DataF
     now = pd.Timestamp.now(tz='UTC')
     start = now - pd.Timedelta(hours=hours)
     df = client.query_range(query=metric_query, start=start.isoformat(), end=now.isoformat(), step='30s')
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
+    # Guard against empty responses or unexpected schema from Prometheus
+    if not df.empty and 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
     return df
 
 
@@ -566,7 +621,7 @@ def render_cluster_health_dashboard(
     with col6:
         last_time = incident_summary['last_incident']
         if last_time:
-            time_str = last_time.strftime('%H:%M UTC')
+            time_str = format_ist_time(last_time)
         else:
             time_str = '-'
         st.markdown(f"""
@@ -653,76 +708,166 @@ def render_historical_analysis_section(
     incident_manager: IncidentManager,
     anomalies_df: pd.DataFrame,
     metric_name: str = 'CPU utilization (%)',
+    latest_values: dict[str, float] | None = None,
+    warmup_info: dict[str, Any] | None = None,
 ) -> None:
-    """
-    Render Historical AI Analysis section.
-    
-    Shows incidents detected over the lookback window.
-    Metric-aware incident card rendering.
-    """
-    st.markdown('### 📈 Historical AI Analysis')
-    st.markdown('_Anomalies detected over selected lookback window_')
-    
+    """Render historical incident analysis with NOC-style reporting."""
+    st.markdown('### 📈 Incident Summary')
+    st.markdown('_Operator-facing incident timeline and recovery details_')
+
     incident_summary = incident_manager.get_incident_summary()
-    
-    if incident_summary['active_incidents'] == 0 and incident_summary['resolved_24h'] == 0:
-        st.success('✅ No incidents detected in the selected timeframe')
+
+    # Show warmup notification immediately, even if there are no incidents yet
+    in_warmup: bool = bool(warmup_info and warmup_info.get('in_warmup', False)) if warmup_info else False
+
+    # Also consider the app process uptime: show baseline banner during the first `warmup_minutes` of app runtime
+    app_uptime = datetime.now(timezone.utc) - APP_START_TIME
+    app_uptime_minutes = app_uptime.total_seconds() / 60.0
+    # If the process just started (less than 5 minutes), force a warmup banner so operators see it immediately
+    if app_uptime_minutes < 5.0:
+        in_warmup = True
+        # create a lightweight warmup_info if not provided
+        if not warmup_info:
+            warmup_info = {'in_warmup': True, 'warmup_end_time': APP_START_TIME + timedelta(minutes=5), 'samples_collected': 0, 'reason': 'Application startup: collecting baseline...'}
+
+    if in_warmup and warmup_info:
+        end_time = warmup_info.get('warmup_end_time')
+        end_str = end_time.isoformat() if hasattr(end_time, 'isoformat') and end_time is not None else 'pending'
+        filtered = warmup_info.get('filtered_out', 0)
+        samples_collected = warmup_info.get('samples_collected', 0)
+        samples_remaining = warmup_info.get('samples_remaining', 0)
+        raw_time_remaining = warmup_info.get('time_remaining_seconds', warmup_info.get('time_remaining', 0.0))
+        try:
+            time_remaining_seconds = float(raw_time_remaining)
+        except (TypeError, ValueError):
+            time_remaining_seconds = 0.0
+        time_remaining = (
+            f"{int(time_remaining_seconds // 60)}m {int(time_remaining_seconds % 60)}s"
+            if time_remaining_seconds > 0
+            else None
+        )
+
+        st.warning(
+            f"🔄 **Collecting baseline...** {warmup_info.get('reason', '')} "
+            f"— Estimated warmup end: {end_str}"
+        )
+        info_text = (
+            f"Samples collected: {samples_collected} / {warmup_info.get('sample_threshold', 0)} "
+            f"(remaining: {samples_remaining})"
+        )
+        if time_remaining is not None:
+            info_text += f" · Time remaining: {time_remaining}"
+        st.info(info_text)
+        if filtered:
+            st.info(f"Filtered out {filtered} startup samples")
+
+    anomaly_present = not anomalies_df.empty
+    current_avg = sum(latest_values.values()) / len(latest_values) if latest_values else 0.0
+    current_is_normal = current_avg < 50.0
+
+    if not anomaly_present and incident_summary['active_incidents'] == 0:
+        st.markdown('### System Status')
+        if incident_summary['resolved_24h'] > 0:
+            st.success('✅ No active anomalies detected. Recent incidents recovered during the selected lookback window.')
+            st.info('Current cluster health is stable, and the ML consensus confirms a recovered state.')
+        else:
+            st.success('✅ No anomalies detected in the selected lookback window.')
+            st.info('All ML detectors agree that the monitored nodes are behaving normally. Current cluster health is stable.')
         return
-    
-    # Show active incidents
+
+    if anomaly_present and current_is_normal and incident_summary['active_incidents'] == 0:
+        st.markdown('### System Status')
+        st.success('✅ Recovered anomaly detected earlier in the selected lookback window.')
+        st.info('Current CPU has returned to normal while the historical ML consensus still reports a recent incident.')
+    elif incident_summary['active_incidents'] > 0 or (anomaly_present and not current_is_normal):
+        st.markdown('### System Status')
+        st.error('⚠️ Active anomaly detected in the selected lookback window.')
+        st.info('The ML consensus and current health metrics indicate a continuing CPU spike or elevated load.')
+
     if incident_summary['active_incidents'] > 0:
         st.markdown(f"**🔴 {incident_summary['active_incidents']} Active Incident(s)**")
-        for incident in incident_manager.active_incidents.values():
-            render_incident_card(incident, incident_mgr=incident_manager, metric_name=metric_name)
-    
-    # Show recent recovered incidents
+        for incident in sorted(incident_manager.active_incidents.values(), key=lambda item: item.start_time or datetime.now(timezone.utc), reverse=True):
+            render_incident_card(incident, incident_mgr=incident_manager, metric_name=metric_name, latest_values=latest_values)
+
     if incident_summary['resolved_24h'] > 0:
-        st.markdown(f"**🟢 {incident_summary['resolved_24h']} Resolved Incident(s) (Last 24h)**")
+        st.markdown(f"**🟢 {incident_summary['resolved_24h']} Recovered Incident(s) (Last 24h)**")
         recent_recovered = [
             inc for inc in incident_manager.recovered_incidents
             if inc.end_time and (datetime.now(timezone.utc) - inc.end_time) < timedelta(hours=24)
         ]
-        for incident in recent_recovered[-3:]:  # Show last 3
-            render_incident_card(incident, incident_mgr=incident_manager, metric_name=metric_name)
-    
+        for incident in recent_recovered[-3:]:
+            render_incident_card(incident, incident_mgr=incident_manager, metric_name=metric_name, latest_values=latest_values)
+
     st.markdown('---')
 
 
-def render_incident_card(incident: Incident, incident_mgr: IncidentManager | None = None, metric_name: str = 'CPU utilization (%)') -> None:
-    """Render a single incident card with metric-aware labels."""
-    status_color = '#4CAF50' if incident.status == 'Recovered' else '#F44336'
-    status_bg = '#E8F5E9' if incident.status == 'Recovered' else '#FFEBEE'
-    
-    start_str = incident.start_time.strftime('%H:%M UTC') if incident.start_time else '-'
-    end_str = incident.end_time.strftime('%H:%M UTC') if incident.end_time else 'Ongoing'
-    
-    # Use provided incident manager or create temporary one for classification
+def render_incident_card(
+    incident: Incident,
+    incident_mgr: IncidentManager | None = None,
+    metric_name: str = 'CPU utilization (%)',
+    latest_values: dict[str, float] | None = None,
+) -> None:
+    """Render a single incident card with operator-friendly timeline and recovery details."""
     mgr = incident_mgr if incident_mgr else IncidentManager()
     severity = mgr.classify_severity(
         incident.confidence_score,
         incident.peak_value,
         incident.duration_seconds,
-        len(incident.affected_nodes)
+        len(incident.affected_nodes),
     )
-    
+    badge = mgr.get_status_badge(incident)
+    start_str = format_ist_time(incident.start_time) if incident.start_time else '-'
+    peak_str = format_ist_time(incident.peak_time) if incident.peak_time else start_str
+    recovery_str = format_ist_time(incident.recovery_time) if incident.recovery_time else '—'
+    end_str = format_ist_time(incident.end_time) if incident.end_time else 'Active'
     peak_label = get_metric_label('Peak', metric_name)
     peak_formatted = format_metric_value(incident.peak_value, metric_name)
-    
+    current_label = get_metric_label('Current', metric_name)
+
+    current_value = None
+    if latest_values:
+        affected_values = [latest_values.get(node, 0.0) for node in incident.affected_nodes if latest_values.get(node) is not None]
+        if affected_values:
+            current_value = sum(affected_values) / len(affected_values)
+    recovery_points = None if current_value is None else max(0.0, incident.peak_value - current_value)
+
+    status_color = '#4CAF50' if incident.status == 'Recovered' else '#F44336'
+    status_bg = '#E8F5E9' if incident.status == 'Recovered' else '#FFEBEE'
+
     st.markdown(f"""
     <div class='incident-card' style='border-left-color: {status_color}; background: {status_bg}'>
-        <div style='display: flex; justify-content: space-between;'>
+        <div style='display: flex; justify-content: space-between; align-items: center;'>
             <div>
-                <b>Incident {incident.incident_id}</b> — {incident.status}
+                <b>Incident {incident.incident_id}</b>
             </div>
-            <div>{get_status_badge_html(severity)}</div>
+            <div>{badge}</div>
         </div>
         <div style='margin-top: 8px; font-size: 0.9em;'>
-            <b>{peak_label}:</b> {peak_formatted} | 
-            <b>Duration:</b> {incident.duration_str} | 
-            <b>Affected Nodes:</b> {len(incident.affected_nodes)}
+            <b>{peak_label}:</b> {peak_formatted} | <b>Duration:</b> {incident.duration_str} | <b>Affected Nodes:</b> {len(incident.affected_nodes)}
         </div>
-        <div style='margin-top: 4px; font-size: 0.9em;'>
-            <b>Time:</b> {start_str} → {end_str}
+        <div style='margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;'>
+            <div><b>Started:</b><br>{start_str}</div>
+            <div><b>Peak:</b><br>{peak_str}</div>
+            <div><b>{'Recovered' if incident.status == 'Recovered' else 'Status'}:</b><br>{recovery_str if incident.status == 'Recovered' else ('Active' if incident.is_active else 'Monitoring')}</div>
+            <div><b>Duration:</b><br>{incident.duration_str}</div>
+        </div>
+        <div style='margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;'>
+            <div><b>{peak_label}:</b><br>{peak_formatted}</div>
+            <div><b>{current_label}:</b><br>{format_metric_value(current_value, metric_name) if current_value is not None else 'n/a'}</div>
+            <div><b>Recovery:</b><br>{f'{recovery_points:.0f} percentage points' if recovery_points is not None else 'n/a'}</div>
+            <div><b>Status:</b><br>{incident.status}</div>
+        </div>
+        <div style='margin-top: 8px;'>
+            <b>Incident Summary</b><br>{mgr.generate_explanation(incident, metric_name=metric_name)}
+        </div>
+        <div style='margin-top: 8px;'>
+            <b>Operator Recommendations</b>
+            <ul style='margin: 4px 0 0 0; padding-left: 18px;'>
+                {''.join(f'<li>{item}</li>' for item in mgr.get_operator_recommendations(metric_name))}
+            </ul>
+        </div>
+        <div style='margin-top: 8px; font-size: 0.85em; color: #666;'>
+            <b>Consensus:</b> {len(incident.detectors)}/4 models · <b>Confidence:</b> {int(incident.confidence_score * 100)}% · <b>Severity:</b> {severity}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -733,74 +878,200 @@ def render_detector_consensus_improved(
     latest_values: dict[str, float],
     warmup_info: dict[str, Any] | None = None,
     metric_name: str = 'CPU utilization (%)',
+    incident_manager: IncidentManager | None = None,
 ) -> None:
+    """Render an operator-friendly NOC-style ML Consensus section.
+
+    This function only updates presentation/UI. It does not change detector
+    outputs, thresholds, incident logic, or ensemble voting.
     """
-    Render improved consensus display with checkmarks for each model.
-    Metric-aware labels and formatting.
-    """
-    st.markdown('### 🤖 ML Model Consensus')
-    st.markdown('_Per-node anomaly detection results_')
-    
+    st.markdown('### 🤖 ML Consensus')
+    st.markdown('_Per-node detector agreement and decision summary_')
+
     in_warmup: bool = bool(warmup_info and warmup_info.get('in_warmup', False)) if warmup_info else False
-    
     if in_warmup:
-        st.info("⏳ System in warmup period — alerts disabled")
-    
-    # Collect per-node results
-    per_instance_data: dict[str, dict[str, Any]] = {}
-    
+        st.info('⏳ System in warmup period — alerts disabled')
+
+    # Build per-instance detector aggregation from model results
+    per_instance: dict[str, dict[str, Any]] = {}
+    detector_list = ['Rolling Mean', 'EWMA', 'Z Score', 'Isolation Forest']
+
     for model_name, info in results.items():
-        if 'anomalies' not in info:
-            continue
-        anomalies = info.get('anomalies', [])
+        anomalies = info.get('anomalies', []) if isinstance(info, dict) else []
         for a in anomalies:
-            inst = a.get('instance', 'unknown')
-            if inst not in per_instance_data:
-                per_instance_data[inst] = {
-                    'detectors': set(),
-                    'peak': 0,
-                    'confidence': 0,
-                    'values': [],
-                }
-            per_instance_data[inst]['detectors'].add(model_name)
-            val = a.get('details', {}).get('value') if isinstance(a.get('details'), dict) else a.get('value')
+            inst = str(a.get('instance', 'unknown'))
+            entry = per_instance.setdefault(inst, {'detectors': set(), 'values': [], 'first_anomaly': None, 'last_anomaly': None})
+            entry['detectors'].add(model_name)
+            val = None
+            if isinstance(a.get('details'), dict):
+                val = a['details'].get('value')
+            if val is None:
+                val = a.get('value')
             if isinstance(val, (int, float)):
-                per_instance_data[inst]['values'].append(val)
-                per_instance_data[inst]['peak'] = max(per_instance_data[inst]['peak'], val)
-    
-    if not per_instance_data:
-        st.write('✅ No anomalies detected by any model')
+                entry['values'].append(float(val))
+            ts = a.get('timestamp')
+            if ts is not None:
+                try:
+                    ts_parsed = pd.to_datetime(ts, utc=True)
+                    # first_anomaly should be earliest timestamp
+                    if entry.get('first_anomaly') is None or ts_parsed < entry['first_anomaly']:
+                        entry['first_anomaly'] = ts_parsed
+                    # last_anomaly records latest anomaly observed in history (for charts)
+                    if entry.get('last_anomaly') is None or ts_parsed > entry['last_anomaly']:
+                        entry['last_anomaly'] = ts_parsed
+                except Exception:
+                    pass
+
+    # Ensure every known node is shown
+    for inst in sorted(latest_values.keys()):
+        per_instance.setdefault(inst, {'detectors': set(), 'values': [], 'first_anomaly': None, 'last_anomaly': None})
+
+    # Compute current consensus (uses latest per-model predictions)
+    instances = sorted(per_instance.keys())
+    node_consensus = compute_node_consensus(results, instances)
+    if not instances:
+        st.success('✅ No instances available for ML consensus.')
         return
-    
-    # Render per-node consensus
-    peak_label = get_metric_label('Peak', metric_name)
-    current_label = get_metric_label('Current', metric_name)
-    
-    for inst, data in sorted(per_instance_data.items()):
-        col1, col2 = st.columns([2, 1])
-        
+
+    for inst in instances:
+        data = per_instance[inst]
+        # Use node_consensus (current sample based) for votes and models
+        nc = node_consensus.get(inst, {})
+        votes = int(nc.get('votes', 0))
+        confidence = int((nc.get('confidence', 0.0) * 100))
+        peak = data['values'] and max(data['values']) or None
+        current = latest_values.get(inst)
+        recovery_pp = calculate_recovery_percentage(current or 0.0, peak or 0.0) if peak else None
+
+        # Determine consensus textual status using current sample
+        consensus_status, decision, _ = get_consensus_state(votes, current, metric_name)
+
+        # Find related incident if any
+        incident_for_node = None
+        if incident_manager:
+            # prefer active incidents then recovered
+            for inc in incident_manager.active_incidents.values():
+                if inst in inc.affected_nodes:
+                    incident_for_node = inc
+                    break
+            if not incident_for_node:
+                # most recent recovered incident for this node
+                recs = [inc for inc in incident_manager.recovered_incidents if inst in inc.affected_nodes]
+                if recs:
+                    incident_for_node = sorted(recs, key=lambda x: x.end_time or x.start_time, reverse=True)[0]
+
+        # Top card: node name, status badge, severity badge
+        col1, col2 = st.columns([3, 1])
         with col1:
             st.markdown(f"**{inst}**")
-            
-            # Detector checkmarks
-            detector_list = ['Rolling Mean', 'EWMA', 'Robust Z Score', 'Isolation Forest']
-            for detector in detector_list:
-                check = '✔️' if detector in data['detectors'] else '  '
-                color = 'color: #4CAF50' if detector in data['detectors'] else 'color: #ccc'
-                st.markdown(
-                    f'<div class="detector-check" style="{color}">{check} {detector}</div>',
-                    unsafe_allow_html=True
-                )
-            
-            votes = len(data['detectors'])
-            confidence = votes / 4
-            st.markdown(f"**Consensus:** {votes}/4 models — {int(confidence * 100)}%")
-        
         with col2:
-            st.metric('Peak CPU', f"{data['peak']:.1f}%")
-            current = latest_values.get(inst, 0)
-            recovery = calculate_recovery_percentage(current, data['peak'])
-            st.metric('Recovered', f"{recovery:.0f}%")
+            badge = '🟢' if consensus_status in ['Healthy', 'Recovered'] else ('🟡' if consensus_status == 'Recovered' else '🔴')
+            st.markdown(f"{badge} **{consensus_status}**")
+
+        # Compact two-row stats: Incident Statistics and Detector table
+        stat_col, det_col = st.columns([2, 3])
+
+        with stat_col:
+            st.markdown('**Incident Statistics**')
+            peak_label = get_metric_label('Peak', metric_name)
+            current_label = get_metric_label('Current', metric_name)
+            if peak is not None:
+                st.markdown(f"**{peak_label}**\n{format_metric_value(peak, metric_name)}")
+            else:
+                st.markdown(f"**{peak_label}**\n—")
+            st.markdown(f"**{current_label}**\n{format_metric_value(current, metric_name) if current is not None else '—'}")
+            if recovery_pp is not None:
+                st.markdown(f"**CPU Reduction Since Peak**\n{recovery_pp:.0f} percentage points")
+
+            # Incident times/duration
+            if incident_for_node:
+                start = format_ist_time(incident_for_node.start_time) if incident_for_node.start_time else '—'
+                if incident_for_node.status == 'Recovered':
+                    recovered_at = format_ist_time(incident_for_node.recovery_time) if incident_for_node.recovery_time else '—'
+                    duration = incident_for_node.duration_str
+                    st.markdown(f"**Incident Started**\n{start}")
+                    st.markdown(f"**Recovered**\n{recovered_at}")
+                    st.markdown(f"**Duration**\n{duration}")
+                else:
+                    duration = incident_for_node.duration_str
+                    st.markdown(f"**Incident Started**\n{start}")
+                    st.markdown(f"**Status**\n🔴 Active")
+                    st.markdown(f"**Duration**\n{duration}")
+            else:
+                # Fall back to the latest anomaly timestamp when there is no active incident
+                if data.get('last_anomaly') is not None:
+                    st.markdown(f"**Last anomaly**\n{format_ist_time(data['last_anomaly'])}")
+                elif data.get('first_anomaly') is not None:
+                    st.markdown(f"**Last anomaly**\n{format_ist_time(data['first_anomaly'])}")
+                else:
+                    st.markdown("**Last anomaly**\n—")
+
+        with det_col:
+            st.markdown('**Detector Results**')
+            # Render detector table with icons and description
+            # Use current_votes from node_consensus to show live detector state
+            current_models = set(nc.get('models', []))
+            for detector in detector_list:
+                voted = detector in current_models
+                icon = '✓' if voted else '✗'
+                label = 'Anomaly' if voted else 'Normal'
+                color = '#4CAF50' if voted else '#777'
+                st.markdown(f"<div style='display:flex;justify-content:space-between;align-items:center;padding:4px 0;'>"
+                            f"<div style='color:{color};font-weight:700;'>{icon} {detector}</div>"
+                            f"<div style='color:{color};font-weight:600;'>{label}</div>"
+                            f"</div>", unsafe_allow_html=True)
+
+        # Agreement / Confidence / Reason / Final Decision
+        agree_col, conf_col = st.columns([2, 3])
+        with agree_col:
+            st.markdown('**Detector Agreement**')
+            st.markdown(f"{votes} / {len(detector_list)} detectors")
+        with conf_col:
+            st.markdown('**Ensemble Confidence**')
+            st.markdown(f"{confidence}% — This represents the fraction of detectors that signalled an anomaly. Higher values mean stronger agreement across independent detectors.")
+
+        st.markdown('**Final Decision**')
+        st.markdown(f"**{decision}**")
+
+        # Expandable explanation panel per-node
+        with st.expander('▼ Why was this classified this way?'):
+            for detector in detector_list:
+                voted = detector in data['detectors']
+                if detector == 'Rolling Mean':
+                    reason = 'Detected sudden deviation from rolling baseline.'
+                elif detector == 'EWMA':
+                    reason = 'Detected sustained increase over recent samples.'
+                elif detector == 'Z Score':
+                    reason = 'Did not exceed the robust statistical threshold.' if not voted else 'Exceeded the robust Z score threshold.'
+                else:
+                    reason = 'Machine learning model detected unusual behaviour.'
+                label = 'Anomaly' if voted else 'Normal'
+                st.markdown(f"**{detector}** — {label}<br><div style='color:#666;margin-left:8px;'>{reason}</div>", unsafe_allow_html=True)
+
+            st.markdown('\n**Summary**')
+            st.markdown(f"{votes} of {len(detector_list)} detectors voted Anomaly. This ensemble aggregates statistical and ML-based signals to improve detection robustness.")
+
+        # Timeline - compact
+        st.markdown('**Timeline**')
+        timeline_items: list[tuple[str, str]] = []
+        if incident_for_node:
+            timeline_items.append((incident_for_node.start_time.strftime('%H:%M'), 'CPU spike detected'))
+            if incident_for_node.detectors:
+                timeline_items.append(((incident_for_node.start_time + pd.Timedelta(minutes=1)).strftime('%H:%M'), f'{len(incident_for_node.detectors)}/{len(detector_list)} detectors agreed'))
+            if incident_for_node.recovery_time:
+                timeline_items.append((incident_for_node.recovery_time.strftime('%H:%M'), 'Recovery confirmed'))
+        else:
+            if data.get('first_anomaly') is not None:
+                la = data['first_anomaly']
+                timeline_items.append((la.strftime('%H:%M'), 'Anomaly observed'))
+                if votes >= 3:
+                    timeline_items.append(((la + pd.Timedelta(minutes=1)).strftime('%H:%M'), 'Consensus reached'))
+                timeline_items.append(('Now', 'Monitoring'))
+
+        for t, msg in timeline_items:
+            st.markdown(f"**{t}** — {msg}")
+
+        st.markdown('---')
 
 
 def render_header() -> None:
@@ -809,7 +1080,7 @@ def render_header() -> None:
     st.markdown('A machine intelligence layer that complements Grafana for anomaly detection.')
 
 
-def render_sidebar(instances: list[str]) -> tuple[str, str, int, str, bool]:
+def render_sidebar(instances: list[str]) -> tuple[str, str, int, str, bool, int, int]:
     st.sidebar.header('AI Dashboard')
     prometheus_url = st.sidebar.text_input('Prometheus URL', PROMETHEUS_URL, key='prometheus_url')
     if instances:
@@ -820,12 +1091,20 @@ def render_sidebar(instances: list[str]) -> tuple[str, str, int, str, bool]:
 
     metric = st.sidebar.selectbox('Metric', list(METRIC_OPTIONS.keys()), index=0, key='metric')
     hours = st.sidebar.slider('Lookback hours', 1, 24, 3, key='hours')
-    auto_refresh = st.sidebar.checkbox('Auto-refresh every 30s', value=False, key='auto_refresh')
-    return instance, metric, hours, prometheus_url, auto_refresh
+    auto_refresh = st.sidebar.checkbox('Auto-refresh every 5s', value=False, key='auto_refresh')
+    st.sidebar.markdown('---')
+    warmup_minutes = st.sidebar.number_input('Warmup minutes', min_value=1, max_value=60, value=5, key='warmup_minutes')
+    sample_threshold = st.sidebar.number_input('Warmup sample threshold', min_value=1, max_value=200, value=10, key='sample_threshold')
+    return instance, metric, hours, prometheus_url, auto_refresh, warmup_minutes, sample_threshold
 
 
 def run_detectors(
-    df: pd.DataFrame, metric_name: str, instance: str | None = None
+    df: pd.DataFrame,
+    metric_name: str,
+    instance: str | None = None,
+    suppress_warmup: bool = True,
+    warmup_minutes: int = 5,
+    sample_threshold: int = 10,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Run all anomaly detectors on the input data.
@@ -842,6 +1121,9 @@ def run_detectors(
         df: DataFrame with metrics (timestamp, instance, value, etc.)
         metric_name: Name of the metric for detector identification
         instance: Instance filter ('All nodes' or specific instance name)
+        suppress_warmup: If True, filter out warmup samples before detecting anomalies
+        warmup_minutes: Warmup duration in minutes for filtering and warmup detection
+        sample_threshold: Minimum number of samples required for warmup completion
     
     Returns:
         Tuple of (results_dict, warmup_info_dict)
@@ -854,10 +1136,27 @@ def run_detectors(
     - Dashboard filters these unreliable samples to prevent false positives
     - This follows production monitoring best practices
     """
-    # Apply startup warmup filtering
-    # This removes the first 5 minutes and/or first 10 samples to avoid
-    # startup anomalies caused by rate() calculation and system initialization
-    df_filtered, warmup_info = filter_startup_samples(df, warmup_minutes=5, sample_threshold=10)
+    # Determine warmup state (always compute for UI notification)
+    warmup_info = detect_warmup_period(df, warmup_minutes=warmup_minutes, sample_threshold=sample_threshold)
+
+    # Apply startup warmup filtering only if suppression is enabled
+    if suppress_warmup:
+        df_filtered, warmup_info = filter_startup_samples(
+            df,
+            warmup_minutes=warmup_minutes,
+            sample_threshold=sample_threshold,
+        )
+    else:
+        # Do not filter; detectors will see all samples. Ensure warmup_info indicates no filtering.
+        df_filtered = df
+        if warmup_info is None:
+            warmup_info = {
+                'in_warmup': False,
+                'warmup_end_time': None,
+                'samples_collected': len(df),
+                'reason': 'Warmup detection skipped',
+            }
+        warmup_info['filtered_out'] = 0
     
     # Use filtered data for detectors, but preserve original data shape for later display
     df_for_detection = df_filtered
@@ -872,7 +1171,14 @@ def run_detectors(
             if inst_df.empty:
                 continue
             # Recursively call without 'All nodes' to process single instance
-            inst_results, _ = run_detectors(inst_df, metric_name, instance=None)
+            inst_results, _ = run_detectors(
+                inst_df,
+                metric_name,
+                instance=None,
+                suppress_warmup=suppress_warmup,
+                warmup_minutes=warmup_minutes,
+                sample_threshold=sample_threshold,
+            )
             all_results[str(inst)] = inst_results
         
         return all_results, warmup_info
@@ -889,10 +1195,23 @@ def run_detectors(
         try:
             if hasattr(detector, 'fit') and name in ['Z Score', 'Isolation Forest']:
                 detector.fit(df_for_detection)
-            anomalies = detector.predict(df_for_detection)
+            predictions = detector.predict(df_for_detection)
+            # Keep full predictions (per-sample) and also list of anomalies (filtered)
             results[name] = {
                 'summary': detector.explain(df_for_detection),
-                'anomalies': explain_anomalies(anomalies),
+                'predictions': [
+                    {
+                        'timestamp': p.timestamp.isoformat() if hasattr(p.timestamp, 'isoformat') else p.timestamp,
+                        'instance': p.instance,
+                        'value': p.details.get('value') if isinstance(p.details, dict) else None,
+                        'is_anomaly': bool(p.is_anomaly),
+                        'score': float(p.score),
+                        'reason': p.reason,
+                        'details': p.details,
+                    }
+                    for p in predictions
+                ],
+                'anomalies': explain_anomalies(predictions),
                 'score': detector.score(df_for_detection),
             }
         except Exception as exc:
@@ -937,14 +1256,18 @@ def summarize_recent_incidents(anomalies_df: pd.DataFrame) -> dict[str, Any]:
 
 def compute_node_consensus(results: dict[str, Any], instances: list[str]) -> dict[str, dict[str, Any]]:
     total_models = len(results)
-    per_instance_votes: dict[str, set[str]] = {}
+    per_instance_votes: dict[str, set[str]] = {inst: set() for inst in instances}
     per_instance_values: dict[str, list[float]] = {}
 
+    # For current detector votes, use the latest prediction per-model per-instance.
     for model_name, info in results.items():
-        anomalies = info.get('anomalies', []) if isinstance(info, dict) else []
+        if not isinstance(info, dict):
+            continue
+
+        # Collect historical anomaly values for peak calculation
+        anomalies = info.get('anomalies', [])
         for a in anomalies:
             inst = str(a.get('instance', 'unknown'))
-            per_instance_votes.setdefault(inst, set()).add(model_name)
             value = None
             if isinstance(a.get('details'), dict):
                 value = a['details'].get('value')
@@ -952,6 +1275,34 @@ def compute_node_consensus(results: dict[str, Any], instances: list[str]) -> dic
                 value = a.get('value')
             if isinstance(value, (int, float)):
                 per_instance_values.setdefault(inst, []).append(float(value))
+
+        # Use predictions (per-sample) to determine the latest sample state
+        preds = info.get('predictions', [])
+        if preds:
+            # Build mapping of instance -> latest prediction
+            latest_by_instance: dict[str, dict] = {}
+            for p in preds:
+                inst = str(p.get('instance', 'unknown'))
+                ts = p.get('timestamp')
+                try:
+                    parsed = pd.to_datetime(ts, utc=True)
+                except Exception:
+                    parsed = None
+                current = latest_by_instance.get(inst)
+                if current is None:
+                    latest_by_instance[inst] = {'parsed': parsed, 'pred': p}
+                else:
+                    # compare timestamps
+                    if parsed is not None and current.get('parsed') is not None:
+                        if parsed > current['parsed']:
+                            latest_by_instance[inst] = {'parsed': parsed, 'pred': p}
+                    elif parsed is not None and current.get('parsed') is None:
+                        latest_by_instance[inst] = {'parsed': parsed, 'pred': p}
+
+            for inst, rec in latest_by_instance.items():
+                pred = rec.get('pred', {})
+                if pred.get('is_anomaly'):
+                    per_instance_votes.setdefault(inst, set()).add(model_name)
 
     node_consensus: dict[str, dict[str, Any]] = {}
     for inst in instances:
@@ -1100,44 +1451,16 @@ def render_summary(
 
 
 def compute_consensus_severity(confidence: float, peak_value: float | None, metric_name: str = 'CPU utilization (%)') -> str:
-    """Compute consensus severity based on confidence and metric-specific thresholds."""
-    config = get_metric_config(metric_name)
-    thresholds = config.get('thresholds', {})
-    
-    # For memory-like metrics, convert to percentage
-    if peak_value is not None and 'Memory' in metric_name and peak_value > 100:
-        pct_available = min((peak_value / (4 * 1024 * 1024 * 1024)) * 100, 100)
-        peak_value = pct_available
-    
-    if peak_value is not None:
-        # Check threshold boundaries for low values
-        if 'healthy' in thresholds:
-            min_val, max_val = thresholds['healthy']
-            if peak_value >= min_val and peak_value < max_val:
-                if confidence > 0.75:
-                    return 'High'
-                return 'Low'
-    
-    # Standard confidence-based severity
-    if confidence > 0.75:
-        return 'Critical'
-    if confidence > 0.5:
-        return 'High'
-    if confidence > 0.25:
-        return 'Medium'
-    return 'Low'
+    """Compute consensus severity using the shared classifier."""
+    return classify_severity(confidence, peak_value, 0.0, 0)
 
 
 def render_auto_refresh(auto_refresh: bool) -> None:
     if not auto_refresh:
         return
 
-    interval_seconds = 30
-    now = time.time()
-    last_refresh = st.session_state.get('last_refresh', 0.0)
-    if now - last_refresh >= interval_seconds:
-        st.session_state['last_refresh'] = now
-        st.rerun()
+    # Streamlit autorefresh helper will rerun the script at a set interval.
+    st_autorefresh(interval=5000, limit=None, key='autorefresh')
 
 
 def render_consensus(
@@ -1361,7 +1684,7 @@ def main() -> None:
     incident_manager = init_incident_manager_state()
     
     instances = get_prometheus_instances(PROMETHEUS_URL)
-    instance, selected_metric, hours, prometheus_url, auto_refresh = render_sidebar(instances)
+    instance, selected_metric, hours, prometheus_url, auto_refresh, warmup_minutes, sample_threshold = render_sidebar(instances)
     render_auto_refresh(auto_refresh)
     metric_query = METRIC_OPTIONS[selected_metric]
 
@@ -1386,9 +1709,20 @@ def main() -> None:
     init_alert_session_state()
     df = add_rolling_features(df)
     
-    # Run detectors and capture warmup info
-    results, warmup_info = run_detectors(df, selected_metric, instance)
-    
+    # Always run warmup filtering for metrics used in dashboard status.
+    df_status, warmup_info = filter_startup_samples(df, warmup_minutes=warmup_minutes, sample_threshold=sample_threshold)
+    df_status_empty = df_status.empty
+
+    # Run detectors and capture warmup info using filtered (post-warmup) data.
+    results, warmup_info = run_detectors(
+        df_status,
+        selected_metric,
+        instance,
+        suppress_warmup=False,
+        warmup_minutes=warmup_minutes,
+        sample_threshold=sample_threshold,
+    )
+
     # Normalize results structure: if per-instance, convert to model-centric format
     if instance == 'All nodes' and 'instance' in df.columns and isinstance(results, dict):
         # Check if results is per-instance (first key is an instance name, value is dict of models)
@@ -1404,23 +1738,41 @@ def main() -> None:
             for inst_name, inst_models in results.items():
                 for model_name, model_data in inst_models.items():
                     if isinstance(model_data, dict) and 'anomalies' in model_data:
-                        model_centric_results[model_name]['anomalies'].extend(model_data['anomalies'])
+                        model_centric_results[model_name]['anomalies'].extend(model_data.get('anomalies', []))
                         model_centric_results[model_name]['summary'] = model_data.get('summary', {})
+                        # Merge predictions (preserve per-sample history)
+                        if 'predictions' in model_data:
+                            model_centric_results[model_name].setdefault('predictions', []).extend(model_data.get('predictions', []))
                         # Use MAX score across instances (any anomaly in any instance should be reported)
                         current_score = model_data.get('score', 0.0)
                         model_centric_results[model_name]['score'] = max(model_centric_results[model_name]['score'], current_score)
             results = model_centric_results
 
-    latest_values = (
+    # Latest raw values (live metrics shown in current health)
+    latest_values_raw_df = (
         df.sort_values('timestamp')
           .groupby('instance')
           .tail(1)
-          .set_index('instance')['value']
-          .astype(float)
-          .rename_axis('instance')
-          .reset_index()
-    )
-    latest_values = {str(row['instance']): float(row['value']) for _, row in latest_values.iterrows()}
+          .reset_index(drop=True)
+    ) if not df.empty else pd.DataFrame(columns=['instance', 'value'])
+
+    latest_values = {
+        str(row['instance']): float(row['value'])
+        for _, row in latest_values_raw_df[['instance', 'value']].iterrows()
+    }
+
+    # Latest filtered values (post-warmup) used for detection/incident logic and ML consensus
+    latest_values_filtered_df = (
+        df_status.sort_values('timestamp')
+                 .groupby('instance')
+                 .tail(1)
+                 .reset_index(drop=True)
+    ) if not df_status.empty else pd.DataFrame(columns=['instance', 'value'])
+
+    latest_values_filtered = {
+        str(row['instance']): float(row['value'])
+        for _, row in latest_values_filtered_df[['instance', 'value']].iterrows()
+    }
 
     # aggregate anomalies across models for chart highlighting
     anomalies_list: list[dict] = []
@@ -1455,9 +1807,9 @@ def main() -> None:
                 current_time=datetime.now(timezone.utc)
             )
     
-    # Update recovery status for active incidents
+    # Update recovery status for active incidents using post-warmup/latest filtered values
     incident_manager.update_incident_recovery(
-        latest_values,
+        latest_values_filtered,
         normal_threshold=50.0,
         current_time=datetime.now(timezone.utc)
     )
@@ -1473,10 +1825,16 @@ def main() -> None:
     render_current_health_section(latest_values, instances, metric_name=selected_metric)
     
     # 3. Historical AI Analysis Section (incidents and anomalies)
-    render_historical_analysis_section(results, incident_manager, anomalies_df, metric_name=selected_metric)
+    render_historical_analysis_section(results, incident_manager, anomalies_df, metric_name=selected_metric, latest_values=latest_values_filtered, warmup_info=warmup_info)
     
     # 4. Improved ML Consensus with checkmarks
-    render_detector_consensus_improved(results, latest_values, warmup_info=warmup_info, metric_name=selected_metric)
+    render_detector_consensus_improved(
+        results,
+        latest_values_filtered,
+        warmup_info=warmup_info,
+        metric_name=selected_metric,
+        incident_manager=incident_manager,
+    )
     
     st.markdown('---')
     

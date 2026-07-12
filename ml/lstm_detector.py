@@ -15,7 +15,7 @@ class LSTMAutoencoderDetector:
     sequence_length: int = 10
     epochs: int = 20
     batch_size: int = 16
-    model: Optional[keras.Model] = None
+    model: Optional[Any] = None
     threshold: Optional[float] = None
 
     def _import_keras(self):

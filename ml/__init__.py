@@ -5,6 +5,7 @@ from .incident_manager import (
     Incident,
     IncidentManager,
     calculate_recovery_percentage,
+    classify_severity,
 )
 from .isolation_forest import IsolationForestDetector
 from .lstm_detector import LSTMAutoencoderDetector
@@ -33,4 +34,5 @@ __all__ = [
     'Incident',
     'IncidentManager',
     'calculate_recovery_percentage',
+    'classify_severity',
 ]
