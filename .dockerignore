@@ -5,8 +5,10 @@
 venv/
 ENV/
 env/
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
 *$py.class
 .ipynb_checkpoints/
 .vscode/
