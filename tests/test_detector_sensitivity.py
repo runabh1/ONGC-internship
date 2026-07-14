@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from ml.baseline_detector import EWMAAnomalyDetector, RollingMeanDetector, ZScoreDetector
+from ml.ensemble import MetricEnsemble
 from ml.isolation_forest import IsolationForestDetector
 from ml.startup_warmup import filter_startup_samples
 
@@ -24,7 +25,7 @@ class DetectorSensitivityTests(unittest.TestCase):
     def test_filter_startup_samples_removes_warmup_period(self) -> None:
         df = pd.DataFrame(
             {
-                'timestamp': pd.date_range('2026-01-01 00:00', periods=8, freq='T'),
+                'timestamp': pd.date_range('2026-01-01 00:00', periods=8, freq='min'),
                 'instance': ['node1'] * 8,
                 'value': [20.0] * 8,
             }
@@ -46,7 +47,7 @@ class DetectorSensitivityTests(unittest.TestCase):
 
         df = pd.DataFrame(
             {
-                'timestamp': pd.date_range('2026-01-01 00:00', periods=100, freq='T'),
+                'timestamp': pd.date_range('2026-01-01 00:00', periods=100, freq='min'),
                 'instance': ['node1'] * 100,
                 'value': [30.0] * 80 + [95.0] * 20,
             }
@@ -57,6 +58,19 @@ class DetectorSensitivityTests(unittest.TestCase):
         self.assertIsNotNone(detector.raw_score_threshold)
         self.assertGreater(sum(p.is_anomaly for p in preds), 0)
         self.assertTrue(preds[-1].is_anomaly or any(preds[-5:]))
+
+    def test_ensemble_exposes_existing_detector_signals(self) -> None:
+        ensemble = MetricEnsemble(metric_name='cpu_used_pct')
+        base_time = pd.Timestamp('2026-01-01 00:00:00', tz='UTC')
+        for idx, value in enumerate([40.0, 41.0, 42.0, 43.0, 44.0, 95.0]):
+            result = ensemble.evaluate(float(value), base_time + pd.Timedelta(minutes=idx))
+
+        self.assertIn('rolling_mean', result.detector_scores)
+        self.assertIn('ewma', result.detector_scores)
+        self.assertIn('zscore', result.detector_scores)
+        self.assertIn('iforest', result.detector_scores)
+        self.assertIn('lstm', result.detector_scores)
+        self.assertGreater(result.ensemble_score, 0.0)
 
 
 if __name__ == '__main__':

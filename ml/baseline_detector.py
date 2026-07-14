@@ -125,8 +125,16 @@ class ZScoreDetector:
     def predict(self, data: pd.DataFrame) -> List[AnomalyResult]:
         df = ensure_df_index(data, 'timestamp')
         values = df['value'].astype(float)
-        mad = max((values - values.median()).abs().median() * 1.4826, 1.0)
-        zscores = (values - values.median()) / mad
+
+        # Use a stable baseline if the detector was fitted previously.
+        if self.fitted_mean is not None and self.fitted_std is not None:
+            baseline_median = self.fitted_mean
+            baseline_mad = self.fitted_std
+        else:
+            baseline_median = float(values.median())
+            baseline_mad = float(max((values - values.median()).abs().median() * 1.4826, 1.0))
+
+        zscores = (values - baseline_median) / baseline_mad
         results: List[AnomalyResult] = []
         for ts, instance, value, score in zip(df.index, df['instance'], df['value'], zscores):
             is_anomaly = score >= self.threshold
@@ -142,8 +150,8 @@ class ZScoreDetector:
                         'value': float(value),
                         'zscore': float(score),
                         'threshold': self.threshold,
-                        'median': self.fitted_mean,
-                        'mad': mad,
+                        'median': baseline_median,
+                        'mad': baseline_mad,
                     },
                 )
             )

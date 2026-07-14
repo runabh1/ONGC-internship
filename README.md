@@ -1,18 +1,18 @@
 # ONGC Cluster Monitor
 
-Comprehensive monitoring stack that combines Prometheus for metrics collection, a Streamlit dashboard for visualization and operator interaction, and a small ML layer for anomaly detection (rolling mean, EWMA, Z-score, Isolation Forest). The project is designed to run locally via Docker Compose for demos and can also be run in a development environment.
+Comprehensive monitoring stack that combines Prometheus for metrics collection, a React-based frontend for visualization, and a small ML layer for anomaly detection (rolling mean, EWMA, Z-score, Isolation Forest). The project is designed to run locally via Docker Compose for demos and can also be run in a development environment.
 
 ## Recent updates
 
 - New functions: added rolling-feature engineering helpers, instance-level aggregation, startup warmup detection and filtering, incident lifecycle management, recovery percentage calculation, and anomaly explanation formatting.
 - New metrics: the dashboard now surfaces CPU utilization, memory availability, load average, and CPU counter metrics, along with derived values such as rolling mean/EWMA/z-score, detector scores, consensus confidence, peak/current values, and recovery status.
-- New dashboard capabilities: the Streamlit experience now includes richer multi-page monitoring with alert summaries, charts, tables, infrastructure checks, auto-refresh, threshold-based health cards, detector filters, local-time incident views, and configurable email alerts.
+- New dashboard capabilities: the React frontend experience now includes richer multi-page monitoring with alert summaries, charts, tables, infrastructure checks, auto-refresh, threshold-based health cards, detector filters, local-time incident views, and configurable email alerts.
 
 ## Quick overview
 
 - Prometheus: scrapes `node_exporter` targets and stores time-series metrics.
 - Alertmanager: receives Prometheus alerts (email/webhook routing configurable).
-- Streamlit app: UI for running ML detectors, viewing charts/tables, and sending email alerts (optional).
+- React frontend: UI for running ML detectors, viewing charts/tables, and sending email alerts (optional).
 - ML detectors: implemented in `ml/` — provide `fit`, `predict`, `score`, and `explain` interfaces.
 
 This README documents how to install, run, develop, test, and troubleshoot the stack.
@@ -39,7 +39,7 @@ docker compose -f docker/docker-compose.yml up --build -d
 ```
 
 Open:
-- Streamlit dashboard: http://localhost:8501
+- Frontend dashboard: http://localhost:3000
 - Prometheus UI: http://localhost:9090
 - Alertmanager UI: http://localhost:9093
 
@@ -51,11 +51,11 @@ docker compose -f docker/docker-compose.yml down
 
 ## Environment variables
 
-- `PROMETHEUS_URL` — Prometheus base URL used by the Streamlit app (default: `http://prometheus:9090` when running in Docker).
+- `PROMETHEUS_URL` — Prometheus base URL used by the React frontend app (default: `http://prometheus:9090` when running in Docker).
 - `EMAIL_USER`, `EMAIL_PASSWORD`, `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM`, `EMAIL_SMTP_SERVER`, `EMAIL_SMTP_PORT` — configure email alerting (optional). If not set, email alerts are disabled.
 - `NODES` / `CLUSTER_NODES` — comma-separated list of node_exporter targets for the infra checker page.
 
-See the top of `docker/docker-compose.yml` and `streamlit_app/app.py` for how these variables are read.
+See the top of `docker/docker-compose.yml` and `frontend/src/App.jsx` for how these variables are read.
 
 ## Prometheus configuration
 
@@ -65,10 +65,10 @@ See the top of `docker/docker-compose.yml` and `streamlit_app/app.py` for how th
 
 Edit these files and restart the `prometheus` service via Docker Compose to apply changes.
 
-## Streamlit app internals (high level)
+## React frontend app internals (high level)
 
-- Entry: `streamlit_app/app.py` — handles UI, datasets, detector orchestration, and alerting logic.
-- Pages: `streamlit_app/pages/` contains `charts.py`, `tables.py`, `alerts.py`, `infra_checker.py`.
+- Entry: `frontend/src/App.jsx` — handles UI, datasets, detector orchestration, and alerting logic.
+- Pages: `frontend/src/` contains `charts.py`, `tables.py`, `alerts.py`, `infra_checker.py`.
 - Charts: Plotly is used for time-series visualizations; anomalies are shown as markers.
 - Tables: timestamps are converted to local time for operator-friendly display.
 
@@ -78,7 +78,7 @@ Edit these files and restart the `prometheus` service via Docker Compose to appl
 flowchart TD
     A[Node hosts with node_exporter]
     B[Prometheus server]
-    C[Streamlit dashboard]
+    C[React frontend dashboard]
     D[ML detectors]
     E[Chart / Table / Incident summary]
     F[Optional Email alert]
@@ -100,21 +100,21 @@ flowchart TD
 
 1. `node_exporter` runs on each monitored host and exposes metrics like CPU, memory, disk, and load.
 2. Prometheus scrapes those hosts regularly and stores the raw time-series metrics in its database.
-3. When the user selects a node, metric, and lookback range in Streamlit, the app issues a Prometheus `query_range` request.
+3. When the user selects a node, metric, and lookback range in React frontend, the app issues a Prometheus `query_range` request.
 4. The Prometheus client in `ml/prometheus_client.py` converts the returned JSON into a Pandas DataFrame with timestamps, instance labels, metric values, and metadata.
-5. Streamlit filters the DataFrame by the selected instance (or processes all nodes) and passes the relevant series to each detector in `ml/`.
+5. React frontend filters the DataFrame by the selected instance (or processes all nodes) and passes the relevant series to each detector in `ml/`.
 6. The detector implementations evaluate the series:
    - Rolling Mean compares the current value to a recent moving baseline.
    - EWMA computes a smoothed expected value and flags deviations.
    - Z-Score uses robust statistics to detect outliers.
    - Isolation Forest uses unsupervised model scoring to find anomalous points.
 7. Each detector returns anomaly events, numeric scores, and human-readable explanation details.
-8. Streamlit aggregates these outputs into an overall consensus per node, then renders:
+8. React frontend aggregates these outputs into an overall consensus per node, then renders:
    - time-series charts with anomaly markers,
    - operator tables with localized timestamps,
    - incident summaries and severity information.
 9. If SMTP is configured and a critical incident is detected, the app can send an email alert. This is optional and separate from Prometheus Alertmanager.
-10. In parallel, Prometheus alert rules in `config/rules/alert_rules.yml` can also fire alerts through Alertmanager, which is handled independently of the Streamlit ML path.
+10. In parallel, Prometheus alert rules in `config/rules/alert_rules.yml` can also fire alerts through Alertmanager, which is handled independently of the React frontend ML path.
 
 ## Cluster status determination
 
@@ -124,7 +124,7 @@ This app determines cluster status using three checks per node:
 - `Prometheus scrape target`: confirms Prometheus has an active `node_exporter` target for that node and that the health status is `up`.
 - `SSH` connectivity: optional check to verify port `22` is reachable, and if a password is supplied and `paramiko` is installed, it can also verify SSH login.
 
-The infrastructure status page is implemented in `streamlit_app/pages/infra_checker.py`, and the actual check logic is in `tests/verify_cluster.py`.
+The infrastructure status page is implemented in `frontend/src/infra_checker.py`, and the actual check logic is in `tests/verify_cluster.py`.
 
 A node is marked as healthy only if all available checks pass. The page shows:
 
@@ -156,7 +156,7 @@ For ONGC deployment, the monitored device setup is split into two parts:
 
 2. Monitoring stack deployment on a central host:
    - Run the Docker Compose stack from this repo on a central monitoring machine.
-   - This central host runs Prometheus, Alertmanager, and the Streamlit dashboard.
+   - This central host runs Prometheus, Alertmanager, and the React frontend dashboard.
    - The central host queries `node_exporter` targets and stores metrics in Prometheus.
 
 ### How to deploy
@@ -171,14 +171,14 @@ docker compose -f docker/docker-compose.yml up --build -d
 
 4. Open the dashboard:
 
-- Streamlit: `http://<monitor-host>:8501`
+- React frontend: `http://<monitor-host>:8501`
 - Prometheus: `http://<monitor-host>:9090`
 - Alertmanager: `http://<monitor-host>:9093`
 
 ### Notes for ONGC deployment
 
 - The app does not need to run on every monitored device. Only `node_exporter` must run there.
-- Prometheus and Streamlit can both run centrally, connecting to all node exporters over the network.
+- Prometheus and React frontend can both run centrally, connecting to all node exporters over the network.
 - If SSH-based status checks are desired, make sure port 22 is reachable and provide credentials in the infra checker page.
 
 Core ML detector implementations are in `ml/`:
@@ -204,10 +204,10 @@ source .venv/bin/activate    # or .venv\\Scripts\\activate on Windows
 pip install -r requirements.txt
 ```
 
-2. Run Streamlit directly:
+2. Run React frontend directly:
 
 ```bash
-streamlit run streamlit_app/app.py
+frontend run frontend/src/App.jsx
 ```
 
 This is useful for fast iteration while developing detectors or UI.
@@ -224,35 +224,35 @@ Example test added: `tests/test_detector_sensitivity.py` verifies detector defau
 
 ## Docker image build notes and performance
 
-- The Streamlit image installs packages from `requirements.txt` during build. `tensorflow-cpu` is present in `requirements.txt` and is large; it significantly increases build time and image size.
-- If you do not need TensorFlow functionality, remove `tensorflow-cpu==2.18.1` from `requirements.txt` to speed up builds and reduce image size, then rebuild the `streamlit` image:
+- The React frontend image installs packages from `requirements.txt` during build. `tensorflow-cpu` is present in `requirements.txt` and is large; it significantly increases build time and image size.
+- If you do not need TensorFlow functionality, remove `tensorflow-cpu==2.18.1` from `requirements.txt` to speed up builds and reduce image size, then rebuild the `frontend` image:
 
 ```bash
 # edit requirements.txt: remove tensorflow-cpu
-docker compose -f docker/docker-compose.yml build --no-cache streamlit
-docker compose -f docker/docker-compose.yml up -d --force-recreate streamlit
+docker compose -f docker/docker-compose.yml build --no-cache frontend
+docker compose -f docker/docker-compose.yml up -d --force-recreate frontend
 ```
 
 ## Troubleshooting
 
 - Port 9090 already in use: On Windows, a local Prometheus process (`prometheus.exe`) can bind 9090 and block Docker's Prometheus container. Stop the local process or change the port mapping.
 - Alertmanager config errors: if Alertmanager fails with `invalid URL: unsupported scheme \"\"`, check `config/alertmanager.yml` for email SMTP placeholders — either supply valid SMTP settings or disable email receivers.
-- Streamlit runtime errors referencing `st.rerun`: older code used `st.rerun()`; the supported API is `st.experimental_rerun()` — source has been updated. Rebuild the Streamlit image after code edits.
+- React frontend runtime errors referencing `st.rerun`: older code used `st.rerun()`; the supported API is `st.experimental_rerun()` — source has been updated. Rebuild the React frontend image after code edits.
 - Slow Docker builds: remove heavy packages (TensorFlow) or build a smaller image using a pared-down `requirements.txt` for the Docker build.
 
 ## Debugging tips & common commands
 
-Tail Streamlit logs:
+Tail React frontend logs:
 
 ```bash
-docker compose -f docker/docker-compose.yml logs --tail 200 streamlit
+docker compose -f docker/docker-compose.yml logs --tail 200 frontend
 ```
 
-Rebuild streamlit only (useful after code edits):
+Rebuild frontend only (useful after code edits):
 
 ```bash
-docker compose -f docker/docker-compose.yml build --no-cache streamlit
-docker compose -f docker/docker-compose.yml up -d --force-recreate streamlit
+docker compose -f docker/docker-compose.yml build --no-cache frontend
+docker compose -f docker/docker-compose.yml up -d --force-recreate frontend
 ```
 
 Check which process holds port 9090 on Windows (PowerShell):
@@ -266,15 +266,15 @@ Get-Process -Id (Get-NetTCPConnection -LocalPort 9090).OwningProcess
 
 - Do not import test modules from production code (avoid `tests.verify_cluster` imports in runtime pages).
 - Keep heavy ML frameworks out of the container unless used at runtime. Move optional models behind feature flags or separate services.
-- If you intend to demo on a machine with slow downloads, pre-build the `streamlit` image and push it to a private registry, or vendor wheels into `pipcheck/` and reference them in the Dockerfile.
+- If you intend to demo on a machine with slow downloads, pre-build the `frontend` image and push it to a private registry, or vendor wheels into `pipcheck/` and reference them in the Dockerfile.
 
 ## Files to inspect when debugging
 
-- `streamlit_app/app.py` — main flow and sidebar controls.
-- `streamlit_app/pages/*.py` — individual page implementations.
+- `frontend/src/App.jsx` — main flow and sidebar controls.
+- `frontend/src/*.py` — individual page implementations.
 - `ml/prometheus_client.py` — Prometheus HTTP wrapper -> returns DataFrame with `timestamp` (seconds since epoch), `instance`, `value`.
 - `ml/baseline_detector.py`, `ml/isolation_forest.py` — detector implementations and hyperparameters.
-- `docker/Dockerfile.streamlit` and `docker/docker-compose.yml` — container build/run definitions.
+- `docker/Dockerfile.frontend` and `docker/docker-compose.yml` — container build/run definitions.
 
 ## Contact & contribution
 

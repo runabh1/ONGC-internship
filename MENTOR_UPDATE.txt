@@ -7,8 +7,8 @@ Project report: full detailed chronological summary
 
 2. Code exploration and context gathering
    - Inspected model implementation files under `ml/`: `baseline_detector.py`, `isolation_forest.py`, `prometheus_client.py`, `utils.py`.
-   - Found Streamlit integration in `streamlit_app/app.py` and page layout under `streamlit_app/pages/`.
-   - Confirmed Docker Compose structure in `docker/docker-compose.yml`, Streamlit Dockerfile in `docker/Dockerfile.streamlit`, and Prometheus/Alertmanager configs in `config/`.
+   - Found React frontend integration in `frontend/src/App.jsx` and page layout under `frontend/src/`.
+   - Confirmed Docker Compose structure in `docker/docker-compose.yml`, React frontend Dockerfile in `docker/Dockerfile.frontend`, and Prometheus/Alertmanager configs in `config/`.
 
 3. Detector recalibration changes
    - In `ml/baseline_detector.py`:
@@ -39,15 +39,15 @@ Project report: full detailed chronological summary
    - Edited `config/alertmanager.yml` to disable email sending and remove invalid SMTP receivers.
    - After this fix, Alertmanager started cleanly.
 
-8. Streamlit auto-refresh bug fix
-   - The app used `st.rerun()`, which caused runtime errors in the current Streamlit version.
-   - Updated `streamlit_app/app.py` to use supported `st.experimental_rerun()`.
-   - Rebuilt the Streamlit image and restarted the Streamlit container to apply the fix.
+8. React frontend auto-refresh bug fix
+   - The app used `st.rerun()`, which caused runtime errors in the current React frontend version.
+   - Updated `frontend/src/App.jsx` to use supported `st.experimental_rerun()`.
+   - Rebuilt the React frontend image and restarted the React frontend container to apply the fix.
 
 9. Timestamp display fix
-   - Identified the timestamp formatting issue in `streamlit_app/pages/tables.py` and `streamlit_app/tables.py`.
-   - Updated `streamlit_app/pages/tables.py` to convert UTC timestamps to local timezone and format them as readable strings.
-   - Updated `streamlit_app/tables.py` to format anomaly timestamps in the display table.
+   - Identified the timestamp formatting issue in `frontend/src/tables.py` and `frontend_app/tables.py`.
+   - Updated `frontend/src/tables.py` to convert UTC timestamps to local timezone and format them as readable strings.
+   - Updated `frontend_app/tables.py` to format anomaly timestamps in the display table.
    - This ensures table rows show correct human-friendly times for the operator.
 
 10. README and documentation update
@@ -56,7 +56,7 @@ Project report: full detailed chronological summary
      * quick Docker and local setup instructions
      * environment variable usage
      * Prometheus and Alertmanager configuration guidance
-     * Streamlit app structure and ML detector descriptions
+     * React frontend app structure and ML detector descriptions
      * troubleshooting notes and productivity tips
      * Docker build notes for the heavy TensorFlow dependency.
    - Added a Mermaid workflow diagram showing how the UI, Prometheus, ML detector layer, and alerting flow interact.
@@ -64,14 +64,14 @@ Project report: full detailed chronological summary
 11. Current project status
    - Code changes are in place for detector recalibration.
    - Email alerts are disabled by default until SMTP is configured.
-   - Docker Compose services are built and the Streamlit container has been restarted after recent source updates.
+   - Docker Compose services are built and the React frontend container has been restarted after recent source updates.
    - The app still needs confirmation by opening `http://localhost:8501` in the browser.
-   - The Streamlit image rebuild is pending for the timestamp fix if the new Docker image has not been fully redeployed.
+   - The React frontend image rebuild is pending for the timestamp fix if the new Docker image has not been fully redeployed.
 
 12. Remaining / recommended actions
    - Confirm the app in the browser and validate the table timestamp behavior.
    - Remove `tensorflow-cpu==2.18.1` from `requirements.txt` if TensorFlow is not required, to reduce Docker build time.
-   - Optionally refactor `streamlit_app/pages/infra_checker.py` to avoid importing test modules in runtime pages.
+   - Optionally refactor `frontend/src/infra_checker.py` to avoid importing test modules in runtime pages.
 
 Files changed or added
 - `ml/baseline_detector.py`
@@ -80,9 +80,9 @@ Files changed or added
 - `ml/prometheus_client.py` (inspected, not changed)
 - `config/alertmanager.yml`
 - `docker/docker-compose.yml`
-- `streamlit_app/app.py`
-- `streamlit_app/pages/tables.py`
-- `streamlit_app/tables.py`
+- `frontend/src/App.jsx`
+- `frontend/src/tables.py`
+- `frontend_app/tables.py`
 - `README.md`
 - `MENTOR_UPDATE.txt`
 

@@ -1,0 +1,1 @@
+{"metric": "load_one", "contamination": 0.05, "random_state": 42, "trained_samples": 30, "last_trained": "2026-07-14T08:52:55.263279+00:00", "raw_score_threshold": 7.806255641895632e-18}

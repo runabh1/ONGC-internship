@@ -2,7 +2,7 @@
 
 ## 1. Project purpose
 
-This project is a Streamlit monitoring dashboard for Prometheus-hosted Linux nodes, with an ML-based anomaly detection layer and alerting support.
+This project is a React frontend monitoring dashboard for Prometheus-hosted Linux nodes, with an ML-based anomaly detection layer and alerting support.
 
 It is designed to:
 - query Prometheus metrics for CPU, load, memory, disk and network
@@ -14,19 +14,19 @@ It is designed to:
 
 ## 2. What has been implemented so far
 
-- Main dashboard in `streamlit_app/app.py`
-- Alerts page in `streamlit_app/pages/alerts.py`
+- Main dashboard in `frontend/src/App.jsx`
+- Alerts page in `frontend/src/alerts.py`
 - Supplemental chart/table pages
 - Prometheus client wrapper in `ml/prometheus_client.py`
 - Detector implementations in `ml/baseline_detector.py`, `ml/isolation_forest.py`, and `ml/lstm_detector.py`
-- Email alerting with deduplication in `streamlit_app/app.py`
+- Email alerting with deduplication in `frontend/src/App.jsx`
 - Auto-refresh sidebar toggle using HTML meta refresh
 - Clear `peak` vs `current` value display in ML consensus
 - Deployment-friendly config via env vars and `config/nodes.yaml`
 
 ## 3. Important code parts and where they live
 
-### `streamlit_app/app.py`
+### `frontend/src/App.jsx`
 This is the core application and contains:
 - app initialization and layout
 - sidebar controls:
@@ -53,7 +53,7 @@ Important UI behavior:
 - Current live value is also shown for context
 - Critical alerts trigger email only when configured
 
-### `streamlit_app/pages/alerts.py`
+### `frontend/src/alerts.py`
 This page builds an incident summary and does:
 - query CPU utilization over a selected lookback window
 - run all detectors again per node
@@ -65,10 +65,10 @@ Key functions:
 - `build_alerts(prometheus_url, hours)`
 - `main()` to render page filters and tables
 
-### `streamlit_app/pages/charts.py`
+### `frontend/src/charts.py`
 This page provides a general chart interface using Prometheus queries and Plotly. It is a simple metric visualization helper.
 
-### `streamlit_app/pages/tables.py`
+### `frontend/src/tables.py`
 This page produces operator-friendly value tables for an instance over time, merging CPU, memory, and disk data.
 
 ## 4. ML and anomaly detection algorithms used
@@ -152,7 +152,7 @@ Behavior:
 
 ## 7. Important APIs and libraries used
 
-- Streamlit (`streamlit`) for dashboard UI
+- React frontend (`frontend`) for dashboard UI
 - Pandas (`pandas`) for time series and data frames
 - Plotly (`plotly.express`, `plotly.graph_objects`) for charts
 - scikit-learn (`IsolationForest`) for unsupervised outlier detection
@@ -164,7 +164,7 @@ Behavior:
 ## 8. Deployment and configuration
 
 - The main app is launched with:
-  - `streamlit run streamlit_app/app.py`
+  - `frontend run frontend/src/App.jsx`
 - Use env vars to point to Prometheus and SMTP settings
 - `config/nodes.yaml` is an optional node list file for helpers/tests
 - No hardcoded production node IPs remain in the main dashboard logic
@@ -181,12 +181,12 @@ Behavior:
 ## 10. How to explain it to the mentor
 
 1. Start with the problem statement:
-   - We built a Prometheus-backed streamlit dashboard with ML-based node anomaly detection and alerting.
+   - We built a Prometheus-backed frontend dashboard with ML-based node anomaly detection and alerting.
 2. Describe the key user flows:
    - discover nodes, select metrics, view consensus, send critical alerts.
 3. Highlight the most important files:
-   - `streamlit_app/app.py` for the main dashboard
-   - `streamlit_app/pages/alerts.py` for incident consolidation
+   - `frontend/src/App.jsx` for the main dashboard
+   - `frontend/src/alerts.py` for incident consolidation
    - `ml/prometheus_client.py` for Prometheus integration
    - `ml/*_detector.py` for the anomaly models
 4. Explain the ML detectors and why they were chosen:

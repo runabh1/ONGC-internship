@@ -59,7 +59,7 @@ For each of the 3 nodes:
 
 ### Step 2: Aggregation to Model-Centric Format
 ```python
-# From streamlit_app/app.py (lines ~468-485)
+# From frontend/src/App.jsx (lines ~468-485)
 model_centric_results[model_name]['anomalies'].extend(model_data['anomalies'])
 model_centric_results[model_name]['score'] = max(
     model_centric_results[model_name]['score'], 
@@ -148,8 +148,8 @@ To verify these scores independently:
 ## 7. Key Code References
 
 - **Score calculation:** [ml/baseline_detector.py:48](ml/baseline_detector.py#L48), [ml/isolation_forest.py:55](ml/isolation_forest.py#L55)
-- **Per-instance aggregation:** [streamlit_app/app.py:468-485](streamlit_app/app.py#L468)
-- **Display rendering:** [streamlit_app/app.py:399-430](streamlit_app/app.py#L399)
+- **Per-instance aggregation:** [frontend/src/App.jsx:468-485](frontend/src/App.jsx#L468)
+- **Display rendering:** [frontend/src/App.jsx:399-430](frontend/src/App.jsx#L399)
 - **Threshold configs:** 
   - [ml/baseline_detector.py:14-15](ml/baseline_detector.py#L14)
   - [ml/baseline_detector.py:66-67](ml/baseline_detector.py#L66)

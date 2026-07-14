@@ -14,7 +14,6 @@ env/
 .vscode/
 .DS_Store
 Thumbs.db
-.streamlit/
 *.log
 TEST_REPORT.md
 *.sqlite
