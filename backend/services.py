@@ -81,24 +81,28 @@ async def get_cluster_summary() -> dict[str, Any]:
                 )
             )
 
-        avg_cpu   = await session.scalar(_agg_metric('cpu_used_pct'))
-        avg_mem   = await session.scalar(_agg_metric('memory_used_pct'))
-        avg_load  = await session.scalar(_agg_metric('load_one'))
-        avg_disk  = await session.scalar(_agg_metric('disk_used_pct'))
-        total_rx  = await session.scalar(_agg_metric('net_rx_bytes', func.sum))
-        total_tx  = await session.scalar(_agg_metric('net_tx_bytes', func.sum))
+        avg_cpu    = await session.scalar(_agg_metric('cpu_used_pct'))
+        avg_mem    = await session.scalar(_agg_metric('memory_used_pct'))
+        avg_load_1 = await session.scalar(_agg_metric('load_one'))
+        avg_load_5 = await session.scalar(_agg_metric('load_five'))
+        avg_load_15= await session.scalar(_agg_metric('load_fifteen'))
+        avg_disk   = await session.scalar(_agg_metric('disk_used_pct'))
+        total_rx   = await session.scalar(_agg_metric('net_rx_bytes', func.sum))
+        total_tx   = await session.scalar(_agg_metric('net_tx_bytes', func.sum))
 
         def _r(v, d=1):
             return round(float(v), d) if v is not None else None
 
         return {
-            'avg_cpu':     _r(avg_cpu),
-            'avg_mem':     _r(avg_mem),
-            'avg_load':    _r(avg_load, 2),
-            'avg_disk':    _r(avg_disk),
-            'total_net_rx':_r(total_rx, 0),
-            'total_net_tx':_r(total_tx, 0),
-            'node_count':  len(online_nodes),
+            'avg_cpu':      _r(avg_cpu),
+            'avg_mem':      _r(avg_mem),
+            'avg_load_1':   _r(avg_load_1, 2),
+            'avg_load_5':   _r(avg_load_5, 2),
+            'avg_load_15':  _r(avg_load_15, 2),
+            'avg_disk':     _r(avg_disk),
+            'total_net_rx': _r(total_rx, 0),
+            'total_net_tx': _r(total_tx, 0),
+            'node_count':   len(online_nodes),
         }
 
 

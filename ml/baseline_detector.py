@@ -28,7 +28,12 @@ class RollingMeanDetector:
                 deviation = 0.0
             else:
                 deviation = (value - baseline) / baseline
-            is_anomaly = value > baseline and deviation >= self.threshold
+            min_delta = max(1.0, baseline * 0.20)
+            is_anomaly = (
+                value > baseline and
+                deviation >= self.threshold and
+                (value - baseline) >= min_delta
+            )
             results.append(
                 AnomalyResult(
                     timestamp=ts,
@@ -41,6 +46,7 @@ class RollingMeanDetector:
                         'value': float(value),
                         'baseline': float(baseline),
                         'threshold': self.threshold,
+                        'min_delta': float(min_delta),
                     },
                 )
             )
@@ -78,7 +84,12 @@ class EWMAAnomalyDetector:
                 deviation = 0.0
             else:
                 deviation = (value - expected) / expected
-            is_anomaly = value > expected and deviation >= self.threshold
+            min_delta = max(1.0, expected * 0.20)
+            is_anomaly = (
+                value > expected and
+                deviation >= self.threshold and
+                (value - expected) >= min_delta
+            )
             results.append(
                 AnomalyResult(
                     timestamp=ts,
@@ -91,6 +102,7 @@ class EWMAAnomalyDetector:
                         'value': float(value),
                         'ewma': float(expected),
                         'threshold': self.threshold,
+                        'min_delta': float(min_delta),
                     },
                 )
             )

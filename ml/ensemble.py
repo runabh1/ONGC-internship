@@ -339,4 +339,4 @@ def seed_ensemble_from_baseline(node_id: int, metric_name: str,
     ens._zscore.fitted_mean = mean
     ens._zscore.fitted_std  = max(std, 0.01)
     logger.info('Seeded ensemble for node=%s metric=%s mean=%.3f std=%.3f',
- 
+                node_id, metric_name, mean, std)

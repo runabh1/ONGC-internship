@@ -415,7 +415,7 @@ async def collect_anomaly_events() -> None:
                         continue
 
                 # --- Handle anomaly emit ---
-                if result.is_anomaly and result.severity is not None:
+                if result.severity in ('Medium', 'High', 'Critical'):
                     # Check for existing open event (dedup)
                     existing_open = await session.scalar(
                         select(AnomalyEvent).where(and_(
@@ -443,6 +443,11 @@ async def collect_anomaly_events() -> None:
                             value, result.ensemble_score,
                             result.detector_scores.get('detectors','')
                         )
+                elif result.severity == 'Low':
+                    logger.debug(
+                        'SUPPRESSED low-severity anomaly for %s %s score=%.3f',
+                        node.hostname, metric_key, result.ensemble_score
+                    )
 
                 # --- Auto-resolve open events when score drops ---
                 elif result.ensemble_score < SEV_RESOLVE:
