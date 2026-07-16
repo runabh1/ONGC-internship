@@ -479,7 +479,7 @@ async def collect_node_processes() -> None:
     Requires SSH_KEY_PATH and SSH_USERNAME to be set in .env.
     Skips gracefully if asyncssh is not installed or SSH is not configured.
 
-    Runs `ps aux` on each node and saves the top 30 processes (by CPU) to the
+    Runs `ps aux` on each node and saves the top 20 processes (by CPU) to the
     NodeProcess table, replacing any stale rows for that node.
     """
     if not SSH_KEY_PATH:
@@ -515,7 +515,7 @@ async def collect_node_processes() -> None:
                     connect_timeout=5,
                 ) as conn:
                     result = await conn.run(
-                        'ps aux --no-headers --sort=-%cpu 2>/dev/null | head -30',
+                        'ps aux --no-headers --sort=-%cpu 2>/dev/null | head -20',
                         timeout=10,
                     )
                     if result.exit_status != 0 or not result.stdout:
