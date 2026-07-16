@@ -514,6 +514,17 @@ async def collect_node_processes() -> None:
                     known_hosts=None,
                     connect_timeout=5,
                 ) as conn:
+                    count_result = await conn.run(
+                        'ps -e --no-headers 2>/dev/null | wc -l',
+                        timeout=10,
+                    )
+                    total_procs = 0
+                    if count_result.exit_status == 0:
+                        try:
+                            total_procs = int(count_result.stdout.strip())
+                        except ValueError:
+                            total_procs = 0
+
                     result = await conn.run(
                         'ps aux --no-headers --sort=-%cpu 2>/dev/null | head -20',
                         timeout=10,
@@ -526,9 +537,10 @@ async def collect_node_processes() -> None:
                         delete(NodeProcess).where(NodeProcess.node_id == node.id)
                     )
 
-                    # Parse `ps aux` output
+                    # Parse the top-20 process snapshot for the detailed list.
                     # Columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-                    for line in result.stdout.strip().splitlines():
+                    lines = [l for l in result.stdout.strip().splitlines() if l.strip()]
+                    for line in lines:
                         parts = line.split(None, 10)
                         if len(parts) < 11:
                             continue
@@ -552,6 +564,19 @@ async def collect_node_processes() -> None:
                             status=stat,
                             collected_at=now,
                         ))
+
+                    # Persist the actual process count as a MetricHistory row so
+                    # services can use it as the authoritative total for the UI.
+                    try:
+                        session.add(MetricHistory(
+                            node_id=node.id,
+                            metric_name='procs_running',
+                            timestamp=now,
+                            value=float(total_procs),
+                            labels=None,
+                        ))
+                    except Exception:
+                        logger.debug('Failed to persist procs_running metric for %s', node.hostname)
 
                     logger.info('Collected processes from %s (%s)', node.hostname, ip)
 

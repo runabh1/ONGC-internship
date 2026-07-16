@@ -451,22 +451,23 @@ async def get_node_processes(node_id: int) -> list[dict[str, Any]]:
             .limit(20)
         )).scalars().all()
         # Determine total process count for this node.
-        # Prefer recent NodeProcess rows collected via SSH (DB) if present —
-        # these represent the actual per-process snapshot shown in the Processes tab.
-        # Fall back to the Prometheus `procs_running` metric only when DB rows are absent/stale.
-        proc_count = (await session.scalar(
-            select(func.count()).select_from(NodeProcess).where(
-                and_(NodeProcess.node_id == node_id,
-                     NodeProcess.collected_at >= cutoff)
-            )
-        )) or 0
-
-        total_count = None
-        if proc_count and proc_count > 0:
-            total_count = int(proc_count)
-        else:
-            # No recent DB rows — try Prometheus metric
-            try:
+        # Prefer the SSH-collected procs_running metric (labels=None) from `ps -e | wc -l`
+        # over the Prometheus node_exporter metric (labels={}) which only counts running processes.
+        # Fall back to Prometheus if SSH metric is not available.
+        total_count = 0
+        try:
+            # First, try to get SSH-collected metric (labels IS NULL)
+            latest_proc_metric = (await session.execute(
+                select(MetricHistory.value)
+                .where(and_(MetricHistory.node_id == node_id,
+                            MetricHistory.metric_name == 'procs_running',
+                            MetricHistory.labels.is_(None)))
+                .order_by(desc(MetricHistory.timestamp))
+                .limit(1)
+            )).scalar_one_or_none()
+            
+            # Fall back to any procs_running if SSH metric not found
+            if latest_proc_metric is None:
                 latest_proc_metric = (await session.execute(
                     select(MetricHistory.value)
                     .where(and_(MetricHistory.node_id == node_id,
@@ -474,15 +475,13 @@ async def get_node_processes(node_id: int) -> list[dict[str, Any]]:
                     .order_by(desc(MetricHistory.timestamp))
                     .limit(1)
                 )).scalar_one_or_none()
-                if latest_proc_metric is not None:
-                    try:
-                        total_count = int(round(float(latest_proc_metric)))
-                    except Exception:
-                        total_count = 0
-            except Exception:
-                total_count = 0
-
-        if total_count is None:
+            
+            if latest_proc_metric is not None:
+                try:
+                    total_count = int(round(float(latest_proc_metric)))
+                except Exception:
+                    total_count = 0
+        except Exception:
             total_count = 0
 
         return {
