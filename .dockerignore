@@ -1,3 +1,32 @@
+# Ignore Python virtual envs, caches and editor files
+.venv
+venv
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.idea/
+.DS_Store
+.git
+
+# Node modules and build outputs (important to avoid sending host node_modules)
+node_modules
+frontend/node_modules
+frontend/build
+frontend/.cache
+
+# Docker and system
+docker-compose.override.yml
+docker-compose.*.yml
+
+# Local data and credentials
+.env
+*.pem
+*.key
+
+# Large artifact dir from pipcheck
+pipcheck/
 .git
 .gitignore
 .venv/

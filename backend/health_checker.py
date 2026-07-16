@@ -50,20 +50,40 @@ IS_WINDOWS = platform.system() == 'Windows'
 # ---------------------------------------------------------------------------
 
 async def _check_ping(ip: str) -> tuple[bool, str]:
-    """ICMP ping — cross-platform."""
-    try:
+    """ICMP ping — cross-platform. Uses asyncio.to_thread + subprocess.run
+    to avoid NotImplementedError on Windows with uvicorn --reload."""
+    import subprocess
+
+    def _do_ping() -> int:
         if IS_WINDOWS:
             cmd = ['ping', '-n', '1', '-w', '1000', ip]
         else:
             cmd = ['ping', '-c', '1', '-W', '1', ip]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            return result.returncode
+        except subprocess.TimeoutExpired:
+            return -1
+        except Exception:
+            return -2
+
+    try:
+        returncode = await asyncio.wait_for(
+            asyncio.to_thread(_do_ping), timeout=8.0
         )
-        await asyncio.wait_for(proc.wait(), timeout=5.0)
-        passed = proc.returncode == 0
-        return passed, ('reachable' if passed else 'ping timed out / unreachable')
+        if returncode == 0:
+            return True, 'reachable'
+        elif returncode == -1:
+            return False, 'ping timed out'
+        elif returncode == -2:
+            return False, 'ping subprocess error'
+        else:
+            return False, 'ping timed out / unreachable'
     except asyncio.TimeoutError:
         return False, 'ping timed out'
     except Exception as exc:
@@ -156,7 +176,9 @@ async def check_node(node: Node, http_session: aiohttp.ClientSession) -> dict:
     }
 
     # Derive overall status
-    if not ping_ok:
+    # Some Docker and WSL environments do not allow ICMP ping from containers.
+    # If ping fails but Prometheus and SSH are both healthy, keep node status unchanged.
+    if not ping_ok and not (ne_ok and prom_ok and ssh_ok):
         status = 'offline'
     elif not ne_ok or not prom_ok:
         status = 'critical'

@@ -190,9 +190,23 @@ async def get_nodes() -> list[dict[str, Any]]:
             logind = latest_per_metric.get('node_logind_sessions')
             user_count = int(round(logind['value'])) if logind is not None else 0
 
-            # Running processes from node_procs_running
+            # Running processes: prefer Prometheus metric `procs_running`,
+            # otherwise fall back to recent `NodeProcess` rows collected via SSH.
             procs_m = latest_per_metric.get('procs_running')
-            running_procs = int(round(procs_m['value'])) if procs_m is not None else 0
+            if procs_m is not None:
+                try:
+                    running_procs = int(round(procs_m['value']))
+                except Exception:
+                    running_procs = 0
+            else:
+                from backend.models import NodeProcess
+                recent_cutoff = datetime.utcnow() - timedelta(seconds=RECENT_SECONDS)
+                proc_count = await session.scalar(
+                    select(func.count()).select_from(NodeProcess).where(
+                        and_(NodeProcess.node_id == node.id, NodeProcess.collected_at >= recent_cutoff)
+                    )
+                ) or 0
+                running_procs = int(proc_count)
 
             node_dict = await _serialize_node(node, latest_metrics=latest)
             node_dict['sparklines']       = sparklines
@@ -436,8 +450,41 @@ async def get_node_processes(node_id: int) -> list[dict[str, Any]]:
             .order_by(desc(NodeProcess.cpu_pct))
             .limit(20)
         )).scalars().all()
-        return [{'id': p.id, 'pid': p.pid, 'username': p.username,
+        # Determine total process count for this node.
+        # Prefer the Prometheus-derived `procs_running` latest metric if available,
+        # otherwise fall back to counting NodeProcess rows in the DB within the cutoff.
+        total_count = None
+        try:
+            latest_proc_metric = (await session.execute(
+                select(MetricHistory.value)
+                .where(and_(MetricHistory.node_id == node_id,
+                            MetricHistory.metric_name == 'procs_running'))
+                .order_by(desc(MetricHistory.timestamp))
+                .limit(1)
+            )).scalar_one_or_none()
+            if latest_proc_metric is not None:
+                try:
+                    total_count = int(round(float(latest_proc_metric)))
+                except Exception:
+                    total_count = None
+        except Exception:
+            total_count = None
+
+        if total_count is None:
+            total_count = (await session.scalar(
+                select(func.count()).select_from(NodeProcess).where(
+                    and_(NodeProcess.node_id == node_id,
+                         NodeProcess.collected_at >= cutoff)
+                )
+            )) or 0
+
+        return {
+            'total': int(total_count),
+            'processes': [
+                {'id': p.id, 'pid': p.pid, 'username': p.username,
                  'cpu_pct': p.cpu_pct, 'mem_pct': p.mem_pct,
                  'command': p.command, 'status': p.status,
                  'collected_at': p.collected_at.isoformat() if p.collected_at else None,
-                 } for p in processes]
+                 } for p in processes
+            ]
+        }

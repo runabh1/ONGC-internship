@@ -1,263 +1,119 @@
 # ONGC Cluster Monitor
 
-Comprehensive monitoring stack that combines Prometheus for metrics collection, a React-based frontend for visualization, and a small ML layer for anomaly detection (rolling mean, EWMA, Z-score, Isolation Forest). The project is designed to run locally via Docker Compose for demos and can also be run in a development environment.
+A local Docker Compose monitoring stack that runs Prometheus, Alertmanager, node_exporter, a FastAPI backend, and a React frontend dashboard.
 
-## Recent updates
+This repo does not use Grafana. The frontend dashboard is served from the built React app on port `3001`.
 
-- New functions: added rolling-feature engineering helpers, instance-level aggregation, startup warmup detection and filtering, incident lifecycle management, recovery percentage calculation, and anomaly explanation formatting.
-- New metrics: the dashboard now surfaces CPU utilization, memory availability, load average, and CPU counter metrics, along with derived values such as rolling mean/EWMA/z-score, detector scores, consensus confidence, peak/current values, and recovery status.
-- New dashboard capabilities: the React frontend experience now includes richer multi-page monitoring with alert summaries, charts, tables, infrastructure checks, auto-refresh, threshold-based health cards, detector filters, local-time incident views, and configurable email alerts.
+## What this stack includes
 
-## Quick overview
+- `db` — PostgreSQL for backend state and metrics history.
+- `prometheus` — Prometheus server scraping `node_exporter` targets and exposing `/api/v1/`.
+- `node_exporter` — exposes host metrics on port `9100`.
+- `backend` — FastAPI service collecting data, health checking nodes, and serving the frontend API.
+- `frontend` — React dashboard served by `serve` on port `3001`.
 
-- Prometheus: scrapes `node_exporter` targets and stores time-series metrics.
-- Alertmanager: receives Prometheus alerts (email/webhook routing configurable).
-- React frontend: UI for running ML detectors, viewing charts/tables, and sending email alerts (optional).
-- ML detectors: implemented in `ml/` — provide `fit`, `predict`, `score`, and `explain` interfaces.
+## Quick start (Docker)
 
-This README documents how to install, run, develop, test, and troubleshoot the stack.
+1. Open a terminal in the repo root:
 
-**Quick start (Docker)**
-
-1. Clone the repo and change directory:
-
-```bash
-git clone <your-repo-url>
-cd Ongc-cluster-monitor
+```powershell
+cd C:\Users\aruna\OneDrive\Desktop\Ongc-cluster-monitor
 ```
 
-2. (Optional) Copy the example env file and edit values:
+2. Bring up the stack from the root `docker-compose.yml` file:
 
-```bash
-cp .env.example .env
+```powershell
+docker compose up --build -d
 ```
 
-3. Start the stack (from repo root):
+3. Open these UIs:
 
-```bash
-docker compose -f docker/docker-compose.yml up --build -d
-```
-
-Open:
-- Frontend dashboard: http://localhost:3000
+- Frontend dashboard: http://localhost:3001
 - Prometheus UI: http://localhost:9090
 - Alertmanager UI: http://localhost:9093
 
-**Stopping**
+> If `http://localhost:3000` opens Grafana or another service, it is not part of this repo. Use `http://localhost:3001` for this app.
 
-```bash
-docker compose -f docker/docker-compose.yml down
+## Stop the stack
+
+```powershell
+docker compose down
 ```
+
+## Ports used by this project
+
+- `3001` → React frontend
+- `8000` → backend HTTP API
+- `9090` → Prometheus UI/API
+- `9093` → Alertmanager UI
+- `9100` → node_exporter metrics endpoint
+- `5432` → PostgreSQL
+
+## Configuration files
+
+- `config/prometheus.yml` — Prometheus scrape configuration.
+- `config/nodes.yaml` — node_exporter targets for Prometheus.
+- `config/rules/alert_rules.yml` — Prometheus alerting rules.
+- `frontend/src/App.jsx` — main React dashboard application.
+- `backend/` — backend service implementation and health check logic.
 
 ## Environment variables
 
-- `PROMETHEUS_URL` — Prometheus base URL used by the React frontend app (default: `http://prometheus:9090` when running in Docker).
-- `EMAIL_USER`, `EMAIL_PASSWORD`, `ALERT_EMAIL_TO`, `ALERT_EMAIL_FROM`, `EMAIL_SMTP_SERVER`, `EMAIL_SMTP_PORT` — configure email alerting (optional). If not set, email alerts are disabled.
-- `NODES` / `CLUSTER_NODES` — comma-separated list of node_exporter targets for the infra checker page.
+The backend reads `.env` if present.
 
-See the top of `docker/docker-compose.yml` and `frontend/src/App.jsx` for how these variables are read.
+Common variables:
 
-## Prometheus configuration
+- `POSTGRES_PASSWORD` — PostgreSQL password (default is set in `docker-compose.yml`).
+- `PROMETHEUS_URL` — backend Prometheus base URL (set to `http://prometheus:9090` inside Docker).
+- `NODES` / `CLUSTER_NODES` — optional comma-separated node exporter targets for health checks.
 
-- Targets: `config/nodes.yaml` (list node_exporter targets)
-- Prometheus config: `config/prometheus.yml`
-- Alert rules: `config/rules/alert_rules.yml`
+## How the app works
 
-Edit these files and restart the `prometheus` service via Docker Compose to apply changes.
+1. `node_exporter` exposes host metrics at each configured target.
+2. Prometheus scrapes those targets using `config/nodes.yaml`.
+3. The backend reads Prometheus data and updates node health and metrics.
+4. The React frontend queries the backend API and displays node status, charts, and anomaly analysis.
 
-## React frontend app internals (high level)
+## Common problems
 
-- Entry: `frontend/src/App.jsx` — handles UI, datasets, detector orchestration, and alerting logic.
-- Pages: `frontend/src/` contains `charts.py`, `tables.py`, `alerts.py`, `infra_checker.py`.
-- Charts: Plotly is used for time-series visualizations; anomalies are shown as markers.
-- Tables: timestamps are converted to local time for operator-friendly display.
+- If the frontend is not visible, open `http://localhost:3001`.
+- If `http://localhost:3000` opens Grafana or another unrelated app, do not use it for this project.
+- Confirm Prometheus is reachable at `http://localhost:9090`.
+- Confirm your nodes in `config/nodes.yaml` are correct and reachable from the Docker host.
 
-**Workflow Diagram**
+## Run locally without Docker
 
-```mermaid
-flowchart TD
-    A[Node hosts with node_exporter]
-    B[Prometheus server]
-    C[React frontend dashboard]
-    D[ML detectors]
-    E[Chart / Table / Incident summary]
-    F[Optional Email alert]
-    G[Alertmanager]
+This repo is designed for Docker Compose, but if needed you can run the backend and frontend manually:
 
-    A -->|HTTP scrape metrics| B
-    B -->|stores time-series data| B
-    C -->|query_range(metric, start, end)| B
-    B -->|returns metric series| C
-    C -->|builds DataFrame and filters instance| D
-    D -->|anomaly labels, scores, explanations| C
-    C -->|renders dashboards and tables| E
-    C -->|sends critical alert if configured| F
-    B -->|runs alert rules| G
-    G -->|handles alerts independently| F
-```
+1. Create a Python virtual environment and install requirements:
 
-### Detailed workflow
-
-1. `node_exporter` runs on each monitored host and exposes metrics like CPU, memory, disk, and load.
-2. Prometheus scrapes those hosts regularly and stores the raw time-series metrics in its database.
-3. When the user selects a node, metric, and lookback range in React frontend, the app issues a Prometheus `query_range` request.
-4. The Prometheus client in `ml/prometheus_client.py` converts the returned JSON into a Pandas DataFrame with timestamps, instance labels, metric values, and metadata.
-5. React frontend filters the DataFrame by the selected instance (or processes all nodes) and passes the relevant series to each detector in `ml/`.
-6. The detector implementations evaluate the series:
-   - Rolling Mean compares the current value to a recent moving baseline.
-   - EWMA computes a smoothed expected value and flags deviations.
-   - Z-Score uses robust statistics to detect outliers.
-   - Isolation Forest uses unsupervised model scoring to find anomalous points.
-7. Each detector returns anomaly events, numeric scores, and human-readable explanation details.
-8. React frontend aggregates these outputs into an overall consensus per node, then renders:
-   - time-series charts with anomaly markers,
-   - operator tables with localized timestamps,
-   - incident summaries and severity information.
-9. If SMTP is configured and a critical incident is detected, the app can send an email alert. This is optional and separate from Prometheus Alertmanager.
-10. In parallel, Prometheus alert rules in `config/rules/alert_rules.yml` can also fire alerts through Alertmanager, which is handled independently of the React frontend ML path.
-
-## Cluster status determination
-
-This app determines cluster status using three checks per node:
-
-- `node_exporter`: verifies that the node exposes metrics on port `9100`.
-- `Prometheus scrape target`: confirms Prometheus has an active `node_exporter` target for that node and that the health status is `up`.
-- `SSH` connectivity: optional check to verify port `22` is reachable, and if a password is supplied and `paramiko` is installed, it can also verify SSH login.
-
-The infrastructure status page is implemented in `frontend/src/infra_checker.py`, and the actual check logic is in `tests/verify_cluster.py`.
-
-A node is marked as healthy only if all available checks pass. The page shows:
-
-- `exporter`: whether the node_exporter endpoint is reachable.
-- `prometheus`: whether Prometheus is scraping that node successfully.
-- `ssh`: whether SSH port 22 is reachable / authenticated.
-- `overall`: a combined healthy indicator based on the above checks.
-
-**Status categories in the current implementation**
-
-This app does not currently assign explicit text labels like `healthy`, `degraded`, or `critical` in the source code. Instead, it uses boolean pass/fail badges for each check, and `overall` is true only when all three checks pass.
-
-A practical interpretation is:
-
-- `Healthy`: all three checks pass.
-- `Degraded`: one or more checks fail.
-- `Critical`: all checks fail or the node is unreachable.
-
-However, these descriptive categories are not stored or displayed by name in the current page; only the individual check statuses and the combined `overall` result are shown.
-
-## Deployment for ONGC devices
-
-For ONGC deployment, the monitored device setup is split into two parts:
-
-1. Node-level deployment on each target machine:
-   - Install and run `node_exporter` on every server or VM you want to monitor.
-   - Ensure `node_exporter` is accessible at `http://<node-ip>:9100/metrics`.
-   - Optionally allow SSH access on port 22 for infrastructure checks.
-
-2. Monitoring stack deployment on a central host:
-   - Run the Docker Compose stack from this repo on a central monitoring machine.
-   - This central host runs Prometheus, Alertmanager, and the React frontend dashboard.
-   - The central host queries `node_exporter` targets and stores metrics in Prometheus.
-
-### How to deploy
-
-1. Install `node_exporter` on each target node.
-2. Add each node target to `config/nodes.yaml`, or set `NODES` / `CLUSTER_NODES` in `.env`.
-3. Start the stack on the central host:
-
-```bash
-docker compose -f docker/docker-compose.yml up --build -d
-```
-
-4. Open the dashboard:
-
-- React frontend: `http://<monitor-host>:8501`
-- Prometheus: `http://<monitor-host>:9090`
-- Alertmanager: `http://<monitor-host>:9093`
-
-### Notes for ONGC deployment
-
-- The app does not need to run on every monitored device. Only `node_exporter` must run there.
-- Prometheus and React frontend can both run centrally, connecting to all node exporters over the network.
-- If SSH-based status checks are desired, make sure port 22 is reachable and provide credentials in the infra checker page.
-
-Core ML detector implementations are in `ml/`:
-- `ml/baseline_detector.py` — Rolling Mean, EWMA, Z-Score detectors (robust statistics; tuned defaults included).
-- `ml/isolation_forest.py` — Isolation Forest wrapper.
-- `ml/prometheus_client.py` — lightweight Prometheus query wrapper (returns Pandas DataFrames).
-
-Detector defaults (current recommended):
-- Rolling Mean: window=15, threshold=0.20
-- EWMA: span=12, threshold=0.20
-- Z-Score: threshold=2.5
-- Isolation Forest: contamination=0.03
-
-You can change these defaults in the detector modules under `ml/`.
-
-## Running locally (development)
-
-1. Create Python venv and install dependencies:
-
-```bash
+```powershell
 python -m venv .venv
-source .venv/bin/activate    # or .venv\\Scripts\\activate on Windows
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-2. Run React frontend directly:
-
-```bash
-frontend run frontend/src/App.jsx
-```
-
-This is useful for fast iteration while developing detectors or UI.
-
-## Tests
-
-The `tests/` directory includes lightweight checks. Run pytest from the repo root:
-
-```bash
-pytest -q
-```
-
-Example test added: `tests/test_detector_sensitivity.py` verifies detector default parameters.
-
-## Docker image build notes and performance
-
-- The React frontend image installs packages from `requirements.txt` during build. `tensorflow-cpu` is present in `requirements.txt` and is large; it significantly increases build time and image size.
-- If you do not need TensorFlow functionality, remove `tensorflow-cpu==2.18.1` from `requirements.txt` to speed up builds and reduce image size, then rebuild the `frontend` image:
-
-```bash
-# edit requirements.txt: remove tensorflow-cpu
-docker compose -f docker/docker-compose.yml build --no-cache frontend
-docker compose -f docker/docker-compose.yml up -d --force-recreate frontend
-```
-
-## Troubleshooting
-
-- Port 9090 already in use: On Windows, a local Prometheus process (`prometheus.exe`) can bind 9090 and block Docker's Prometheus container. Stop the local process or change the port mapping.
-- Alertmanager config errors: if Alertmanager fails with `invalid URL: unsupported scheme \"\"`, check `config/alertmanager.yml` for email SMTP placeholders — either supply valid SMTP settings or disable email receivers.
-- React frontend runtime errors referencing `st.rerun`: older code used `st.rerun()`; the supported API is `st.experimental_rerun()` — source has been updated. Rebuild the React frontend image after code edits.
-- Slow Docker builds: remove heavy packages (TensorFlow) or build a smaller image using a pared-down `requirements.txt` for the Docker build.
-
-## Debugging tips & common commands
-
-Tail React frontend logs:
-
-```bash
-docker compose -f docker/docker-compose.yml logs --tail 200 frontend
-```
-
-Rebuild frontend only (useful after code edits):
-
-```bash
-docker compose -f docker/docker-compose.yml build --no-cache frontend
-docker compose -f docker/docker-compose.yml up -d --force-recreate frontend
-```
-
-Check which process holds port 9090 on Windows (PowerShell):
+2. Start the backend manually:
 
 ```powershell
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+3. Start the frontend manually by running the React app build or using a local server.
+
+## Docker troubleshooting
+
+- If build fails because files are missing, make sure the repo is not stored as OneDrive placeholders. Store the repo locally or mark it "Always keep on this device." 
+- Use `docker compose logs -f backend` and `docker compose logs -f frontend` to inspect runtime issues.
+- If port `3001` is already in use, stop the conflicting service or change the frontend port mapping in `docker-compose.yml`.
+
+## Notes
+
+- This project does not include Grafana.
+- The frontend is served on `3001` by `serve` after the React build.
+- Prometheus is used directly for metrics and alerting.
+- The backend health checker relies on Prometheus `/api/v1/targets` and node exporter target health.
+
 Get-NetTCPConnection -LocalPort 9090 | Format-List
 Get-Process -Id (Get-NetTCPConnection -LocalPort 9090).OwningProcess
 ```

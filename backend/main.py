@@ -1,11 +1,23 @@
 import asyncio
 import logging
+import platform
+from dotenv import load_dotenv
+
+# Load environment variables from .env so uvicorn started from any shell
+# picks up `SSH_KEY_PATH`, `DATABASE_URL`, etc.
+load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api import router as api_router
 from backend.db import init_db
 from backend.collector import run_collector, collect_demo_metrics
+
+# On Windows, the default asyncio event loop (SelectorEventLoop) does not
+# support subprocesses. The ProactorEventLoop must be set as the policy
+# *before* any event loop is created. Uvicorn will then use this policy.
+if platform.system() == "Windows":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 logging.basicConfig(
     level=logging.INFO,

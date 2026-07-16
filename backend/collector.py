@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 PROM_URL          = os.getenv('PROMETHEUS_URL',       'http://localhost:9090')
 COLLECT_INTERVAL  = int(os.getenv('COLLECT_INTERVAL', '60'))
 WARMUP_SECONDS    = int(os.getenv('WARMUP_PERIOD_SECONDS', '300'))
+SSH_KEY_PATH      = os.getenv('SSH_KEY_PATH', '')
+SSH_USERNAME      = os.getenv('SSH_USERNAME', 'ubuntu')
 
 NODES_YAML = os.getenv(
     'NODES_YAML',
@@ -468,6 +470,100 @@ async def collect_anomaly_events() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SSH-based per-process collection
+# ---------------------------------------------------------------------------
+async def collect_node_processes() -> None:
+    """
+    Collect per-process data from each online node via SSH.
+
+    Requires SSH_KEY_PATH and SSH_USERNAME to be set in .env.
+    Skips gracefully if asyncssh is not installed or SSH is not configured.
+
+    Runs `ps aux` on each node and saves the top 30 processes (by CPU) to the
+    NodeProcess table, replacing any stale rows for that node.
+    """
+    if not SSH_KEY_PATH:
+        logger.debug('Process collection skipped — SSH_KEY_PATH not set in .env')
+        return
+    try:
+        import asyncssh  # type: ignore
+    except ImportError:
+        logger.warning(
+            'Process collection skipped — asyncssh not installed. '
+            'Run: pip install asyncssh'
+        )
+        return
+
+    now = datetime.utcnow()
+    async with AsyncSessionLocal() as session:
+        nodes = (
+            await session.execute(
+                select(Node).where(
+                    Node.status.in_(['online', 'warning', 'critical', 'warmup'])
+                )
+            )
+        ).scalars().all()
+
+        for node in nodes:
+            ip = node.ip_address or node.hostname
+            try:
+                async with asyncssh.connect(
+                    ip,
+                    username=SSH_USERNAME,
+                    client_keys=[SSH_KEY_PATH],
+                    known_hosts=None,
+                    connect_timeout=5,
+                ) as conn:
+                    result = await conn.run(
+                        'ps aux --no-headers --sort=-%cpu 2>/dev/null | head -30',
+                        timeout=10,
+                    )
+                    if result.exit_status != 0 or not result.stdout:
+                        continue
+
+                    # Delete old process rows for this node
+                    await session.execute(
+                        delete(NodeProcess).where(NodeProcess.node_id == node.id)
+                    )
+
+                    # Parse `ps aux` output
+                    # Columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+                    for line in result.stdout.strip().splitlines():
+                        parts = line.split(None, 10)
+                        if len(parts) < 11:
+                            continue
+                        try:
+                            pid      = int(parts[1])
+                            cpu_pct  = float(parts[2])
+                            mem_pct  = float(parts[3])
+                            stat     = parts[7]          # STAT column
+                            command  = parts[10][:512]   # full COMMAND
+                            username = parts[0][:64]
+                        except (ValueError, IndexError):
+                            continue
+
+                        session.add(NodeProcess(
+                            node_id=node.id,
+                            pid=pid,
+                            username=username,
+                            cpu_pct=round(cpu_pct, 2),
+                            mem_pct=round(mem_pct, 2),
+                            command=command,
+                            status=stat,
+                            collected_at=now,
+                        ))
+
+                    logger.info('Collected processes from %s (%s)', node.hostname, ip)
+
+            except asyncio.TimeoutError:
+                logger.debug('SSH timeout collecting processes from %s', ip)
+            except Exception as exc:
+                logger.debug('SSH process collection failed for %s: %s', ip, exc)
+
+        await session.commit()
+
+
+# ---------------------------------------------------------------------------
 # Startup seed
 # ---------------------------------------------------------------------------
 async def collect_demo_metrics() -> None:
@@ -475,7 +571,7 @@ async def collect_demo_metrics() -> None:
     One-time startup initialisation:
     1. Purge any unregistered nodes.
     2. Register real nodes from nodes.yaml.
-    3. Run the first Prometheus scrape.
+    3. Run the first Prometheus scrape + process collection.
     """
     await cleanup_unregistered_nodes()
     await register_yaml_nodes()
@@ -483,6 +579,10 @@ async def collect_demo_metrics() -> None:
         await collect_prometheus_metrics()
     except Exception as exc:
         logger.warning('Initial Prometheus collection failed (will retry): %s', exc)
+    try:
+        await collect_node_processes()
+    except Exception as exc:
+        logger.warning('Initial process collection failed (will retry): %s', exc)
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +598,7 @@ async def run_collector() -> None:
         try:
             await collect_prometheus_metrics()
             await collect_anomaly_events()
+            await collect_node_processes()
         except Exception as exc:
             logger.error('Collector cycle error: %s', exc)
         await asyncio.sleep(COLLECT_INTERVAL)

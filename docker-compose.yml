@@ -25,7 +25,8 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/nodes.yaml:/etc/prometheus/nodes.yaml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -43,20 +44,17 @@ services:
     ports:
       - "9100:9100"
     restart: unless-stopped
+    # On Windows Docker Desktop mounting host root (/host) or /proc,/sys is not supported
+    # and causes "not a shared or slave mount" errors. Use a minimal node_exporter config
+    # for local dev on Windows (no host mounts). To collect host metrics run this stack
+    # on Linux or enable appropriate mounts when using a Linux Docker host.
     command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--path.rootfs=/host'
       - '--collector.logind'
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/host:ro,rslave
 
   backend:
     build: 
       context: .
-      dockerfile: docker/Dockerfile.backend
+      dockerfile: backend/Dockerfile
     container_name: ongc_backend
     env_file: .env
     environment:
@@ -64,6 +62,9 @@ services:
       - PROMETHEUS_URL=http://prometheus:9090
     ports:
       - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - "C:/Users/aruna/.ssh:/root/.ssh:ro"
     depends_on:
       db:
         condition: service_healthy
@@ -74,10 +75,10 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: docker/Dockerfile.frontend
+      dockerfile: frontend/Dockerfile
     container_name: ongc_frontend
     ports:
-      - "3000:80"
+      - "3001:3000"
     depends_on:
       - backend
     restart: unless-stopped
