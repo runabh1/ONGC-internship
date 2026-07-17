@@ -190,20 +190,35 @@ async def get_nodes() -> list[dict[str, Any]]:
             logind = latest_per_metric.get('node_logind_sessions')
             user_count = int(round(logind['value'])) if logind is not None else 0
 
-            # Running processes: prefer Prometheus metric `procs_running`,
-            # otherwise fall back to recent `NodeProcess` rows collected via SSH.
-            procs_m = latest_per_metric.get('procs_running')
-            if procs_m is not None:
+            # Running processes: prefer the SSH-collected total process count
+            # (stored with labels=None via `ps -e | wc -l`) over the Prometheus
+            # node_procs_running metric (labels='{}') which only counts processes
+            # actively in R state — typically 1-3 — giving wrong "2 procs" display.
+            recent_cutoff_procs = datetime.utcnow() - timedelta(seconds=RECENT_SECONDS * 3)
+            ssh_procs_row = await session.scalar(
+                select(MetricHistory.value)
+                .where(and_(
+                    MetricHistory.node_id    == node.id,
+                    MetricHistory.metric_name == 'procs_running',
+                    MetricHistory.labels.is_(None),   # SSH-sourced row
+                    MetricHistory.timestamp  >= recent_cutoff_procs,
+                ))
+                .order_by(desc(MetricHistory.timestamp))
+                .limit(1)
+            )
+            if ssh_procs_row is not None:
+                # SSH gave us total process count
                 try:
-                    running_procs = int(round(procs_m['value']))
+                    running_procs = int(round(float(ssh_procs_row)))
                 except Exception:
                     running_procs = 0
             else:
+                # SSH not configured or data too old — fall back to NodeProcess row count
                 from backend.models import NodeProcess
-                recent_cutoff = datetime.utcnow() - timedelta(seconds=RECENT_SECONDS)
+                recent_cutoff_np = datetime.utcnow() - timedelta(seconds=RECENT_SECONDS)
                 proc_count = await session.scalar(
                     select(func.count()).select_from(NodeProcess).where(
-                        and_(NodeProcess.node_id == node.id, NodeProcess.collected_at >= recent_cutoff)
+                        and_(NodeProcess.node_id == node.id, NodeProcess.collected_at >= recent_cutoff_np)
                     )
                 ) or 0
                 running_procs = int(proc_count)
