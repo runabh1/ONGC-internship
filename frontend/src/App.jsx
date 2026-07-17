@@ -74,28 +74,49 @@ const NODE_COLORS = [
 
 /* ─────────────────────── Helpers ─────────────────────── */
 // Convert UTC timestamp to IST (UTC+5:30)
+// Ensure bare UTC ISO strings (no Z / no offset) are always parsed as UTC.
+// The backend uses datetime.utcnow().isoformat() which omits the 'Z' suffix.
+// Without it, JS Date() may treat the string as local time causing ~5:30h drift.
+const toUTC = (iso) => {
+  if (!iso) return null;
+  // Already has timezone info (Z, +, -)
+  if (/[Zz]$|[+-]\d{2}:?\d{2}$/.test(iso)) return new Date(iso);
+  // Bare UTC string — append Z so JS treats it as UTC
+  return new Date(iso + 'Z');
+};
+
 const toIST = (iso) => {
   if (!iso) return null;
-  const utcDate = new Date(iso);
-  // IST is UTC+5:30 (330 minutes offset)
-  const istDate = new Date(utcDate.getTime() + (5.5 * 60 * 60 * 1000));
-  return istDate;
+  // toUTC gives a proper UTC Date; getTime() is always UTC ms.
+  // We then format it in IST using Intl (no manual +5:30 needed).
+  return toUTC(iso);
 };
 
 const fmtTime = (iso) => {
   if (!iso) return '—';
-  const istDate = toIST(iso);
-  return istDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).split(' ')[0] || istDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const d = toUTC(iso);
+  if (!d) return '—';
+  return d.toLocaleTimeString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
 };
 
 const fmtDate = (iso) => {
   if (!iso) return '—';
-  const istDate = toIST(iso);
-  return istDate.toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  const d = toUTC(iso);
+  if (!d) return '—';
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  });
 };
+
 const timeAgo = (iso) => {
   if (!iso) return '—';
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  const d = toUTC(iso);
+  if (!d) return '—';
+  const diff = (Date.now() - d.getTime()) / 1000;
   if (diff < 60)   return `${Math.round(diff)}s ago`;
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
   return `${Math.round(diff / 3600)}h ago`;
