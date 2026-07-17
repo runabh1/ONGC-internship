@@ -1,1 +1,1 @@
-{"metric": "memory_used_pct", "contamination": 0.05, "random_state": 42, "trained_samples": 190, "last_trained": "2026-07-16T18:52:30.229929+00:00", "raw_score_threshold": -1.951563910473908e-17}
+{"metric": "memory_used_pct", "contamination": 0.05, "random_state": 42, "trained_samples": 30, "last_trained": "2026-07-16T20:20:23.822982+00:00", "raw_score_threshold": -3.642919299551295e-17}

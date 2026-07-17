@@ -20,6 +20,10 @@ frontend/.cache
 docker-compose.override.yml
 docker-compose.*.yml
 
+# Scripts and maintenance files
+backend/scripts/
+tests/
+
 # Local data and credentials
 .env
 *.pem

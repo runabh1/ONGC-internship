@@ -1,1 +1,1 @@
-{"metric": "disk_used_pct", "contamination": 0.05, "random_state": 42, "trained_samples": 199, "last_trained": "2026-07-16T18:52:30.460037+00:00", "raw_score_threshold": -2.7972416050126014e-17}
+{"metric": "disk_used_pct", "contamination": 0.05, "random_state": 42, "trained_samples": 30, "last_trained": "2026-07-16T20:20:24.092045+00:00", "raw_score_threshold": 3.469446951953614e-17}

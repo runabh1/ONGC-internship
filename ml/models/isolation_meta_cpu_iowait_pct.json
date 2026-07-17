@@ -1,1 +1,1 @@
-{"metric": "cpu_iowait_pct", "contamination": 0.05, "random_state": 42, "trained_samples": 193, "last_trained": "2026-07-16T18:52:30.751642+00:00", "raw_score_threshold": 4.9873299934333204e-18}
+{"metric": "cpu_iowait_pct", "contamination": 0.05, "random_state": 42, "trained_samples": 30, "last_trained": "2026-07-16T20:21:33.142485+00:00", "raw_score_threshold": -2.7755575615628914e-17}
