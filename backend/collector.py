@@ -578,6 +578,71 @@ async def collect_node_processes() -> None:
                     except Exception:
                         logger.debug('Failed to persist procs_running metric for %s', node.hostname)
 
+                    # ── User sessions via `w` ──────────────────────────────
+                    # `w -hi` output: USER TTY FROM LOGIN@ IDLE JCPU PCPU WHAT
+                    # Example 1: arunabh  pts/0  192.168.56.1  07:32  ...
+                    # Example 2: arunabh         192.168.56.1  07:38  ... (No TTY)
+                    try:
+                        who_result = await conn.run(
+                            'w -hi 2>/dev/null',
+                            timeout=10,
+                        )
+                        # Replace stale user session rows for this node
+                        await session.execute(
+                            delete(NodeUserSession).where(NodeUserSession.node_id == node.id)
+                        )
+                        
+                        num_users = 0
+                        if who_result.exit_status == 0 and who_result.stdout.strip():
+                            who_lines = [l for l in who_result.stdout.strip().splitlines() if l.strip()]
+                            for wl in who_lines:
+                                wparts = wl.split()
+                                if len(wparts) < 2:
+                                    continue
+                                uname = wparts[0][:128]
+                                
+                                # If the second column is an IP (contains '.') or IPv6/display (':'), TTY is missing
+                                if '.' in wparts[1] or ':' in wparts[1] and 'tty' not in wparts[1] and 'pts' not in wparts[1]:
+                                    terminal = None
+                                    remote = wparts[1][:128]
+                                else:
+                                    terminal = wparts[1][:64]
+                                    remote = wparts[2][:128] if len(wparts) > 2 else None
+                                
+                                # Ignore non-interactive background SSH sessions (like our own collector)
+                                if terminal is None:
+                                    continue
+                                
+                                session.add(NodeUserSession(
+                                    node_id=node.id,
+                                    username=uname,
+                                    terminal=terminal,
+                                    remote_host=remote,
+                                    login_time=now,  # w login time format varies too much, use 'now'
+                                    collected_at=now,
+                                ))
+                                num_users += 1
+                                
+                            logger.info(
+                                'Collected %d user session(s) from %s',
+                                len(who_lines), node.hostname,
+                            )
+                            
+                            # Persist to MetricHistory so it overrides Prometheus logind count
+                            try:
+                                session.add(MetricHistory(
+                                    node_id=node.id,
+                                    metric_name='node_logind_sessions',
+                                    timestamp=now,
+                                    value=float(num_users),
+                                    labels=None,
+                                ))
+                            except Exception:
+                                pass
+                                
+                    except Exception as exc:
+                        logger.debug('User session collection failed for %s: %s', ip, exc)
+
                     logger.info('Collected processes from %s (%s)', node.hostname, ip)
 
             except asyncio.TimeoutError:

@@ -186,9 +186,15 @@ async def get_nodes() -> list[dict[str, Any]]:
                 .limit(1)
             )).scalar_one_or_none()
 
-            # Active users from Prometheus node_logind_sessions
-            logind = latest_per_metric.get('node_logind_sessions')
-            user_count = int(round(logind['value'])) if logind is not None else 0
+            # Active users: query the NodeUserSession table directly for the most
+            # accurate and up-to-date count (populated via SSH `w -hi` command).
+            from backend.models import NodeUserSession
+            recent_cutoff_users = datetime.utcnow() - timedelta(seconds=RECENT_SECONDS)
+            user_count = await session.scalar(
+                select(func.count()).select_from(NodeUserSession).where(
+                    and_(NodeUserSession.node_id == node.id, NodeUserSession.collected_at >= recent_cutoff_users)
+                )
+            ) or 0
 
             # Running processes: prefer the SSH-collected total process count
             # (stored with labels=None via `ps -e | wc -l`) over the Prometheus
