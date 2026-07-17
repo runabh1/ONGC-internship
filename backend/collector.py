@@ -587,6 +587,15 @@ async def collect_node_processes() -> None:
                             'w -hi 2>/dev/null',
                             timeout=10,
                         )
+                        # Fetch existing user sessions to preserve original login times
+                        existing_sessions = (await session.execute(
+                            select(NodeUserSession).where(NodeUserSession.node_id == node.id)
+                        )).scalars().all()
+                        login_times = {
+                            (s.username, s.terminal, s.remote_host): s.login_time
+                            for s in existing_sessions if s.login_time
+                        }
+
                         # Replace stale user session rows for this node
                         await session.execute(
                             delete(NodeUserSession).where(NodeUserSession.node_id == node.id)
@@ -613,12 +622,16 @@ async def collect_node_processes() -> None:
                                 if terminal is None:
                                     continue
                                 
+                                # Preserve original login time if this session existed in the previous cycle
+                                session_key = (uname, terminal, remote)
+                                original_login_time = login_times.get(session_key, now)
+
                                 session.add(NodeUserSession(
                                     node_id=node.id,
                                     username=uname,
                                     terminal=terminal,
                                     remote_host=remote,
-                                    login_time=now,  # w login time format varies too much, use 'now'
+                                    login_time=original_login_time,
                                     collected_at=now,
                                 ))
                                 num_users += 1
