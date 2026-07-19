@@ -40,6 +40,7 @@ from backend.services import (
     get_incidents_feed,
     get_alerts_feed,
 )
+from backend.collector import backfill_baselines
 
 router = APIRouter()
 
@@ -210,6 +211,42 @@ async def export_node_metrics(
         media_type='text/csv',
         headers={'Content-Disposition': f'attachment; filename="{fname_base}.csv"'}
     )
+
+
+# ---------------------------------------------------------------------------
+# Node baselines
+# ---------------------------------------------------------------------------
+@router.get('/cluster/node/{node_id}/baselines')
+async def node_baselines(node_id: int):
+    """Return the ML baselines computed during warmup for a node."""
+    from backend.db import get_session
+    from backend.models import NodeBaseline, Node
+    from sqlalchemy import select
+    async with get_session() as session:
+        node = await session.get(Node, node_id)
+        if node is None:
+            raise HTTPException(status_code=404, detail='Node not found')
+        rows = (await session.execute(
+            select(NodeBaseline).where(NodeBaseline.node_id == node_id)
+        )).scalars().all()
+        return [
+            {'metric_name': r.metric_name, 'mean': r.mean, 'std': r.std,
+             'p95': r.p95, 'p99': r.p99}
+            for r in rows
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Admin — on-demand backfill
+# ---------------------------------------------------------------------------
+@router.post('/admin/backfill-baselines')
+async def trigger_backfill():
+    """Trigger an immediate ML baseline backfill from metric history."""
+    try:
+        await backfill_baselines()
+        return {'status': 'ok', 'message': 'Baseline backfill completed'}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 # ---------------------------------------------------------------------------
 # WebSocket — live push
