@@ -445,6 +445,68 @@ async def collect_anomaly_events() -> None:
                             value, result.ensemble_score,
                             result.detector_scores.get('detectors','')
                         )
+
+                        # ── Incident lifecycle ─────────────────────────────────────
+                        # Severity rank so we can escalate without downgrading
+                        SEV_RANK = {'Medium': 1, 'High': 2, 'Critical': 3}
+
+                        open_incident = await session.scalar(
+                            select(Incident).where(and_(
+                                Incident.node_id   == node.id,
+                                Incident.end_time.is_(None),
+                                # link by description prefix so we match this metric
+                                Incident.description.like(f'%{metric_key}%'),
+                            )).limit(1)
+                        )
+                        if open_incident is None:
+                            # Open a brand-new incident
+                            incident_desc = (
+                                f'{metric_key} anomaly on {node.hostname}: '
+                                f'{result.description}'
+                            )
+                            new_incident = Incident(
+                                node_id     = node.id,
+                                start_time  = now,
+                                end_time    = None,
+                                peak_value  = result.metric_value,
+                                status      = 'Active',
+                                confidence  = result.ensemble_score,
+                                severity    = result.severity,
+                                description = incident_desc,
+                            )
+                            session.add(new_incident)
+                            await session.flush()  # get new_incident.id
+
+                            # Create a matching Alert
+                            session.add(Alert(
+                                node_id    = node.id,
+                                alert_time = now,
+                                severity   = result.severity,
+                                status     = 'active',
+                                summary    = incident_desc,
+                            ))
+                            logger.info(
+                                'INCIDENT+ALERT opened for %s — %s [%s]',
+                                node.hostname, metric_key, result.severity
+                            )
+                        else:
+                            # Escalate existing incident if severity increased
+                            cur_rank  = SEV_RANK.get(open_incident.severity or 'Medium', 1)
+                            new_rank  = SEV_RANK.get(result.severity, 1)
+                            if new_rank > cur_rank:
+                                open_incident.severity = result.severity
+                                logger.info(
+                                    'INCIDENT escalated for %s — %s → %s',
+                                    node.hostname, metric_key, result.severity
+                                )
+                            # Update peak value
+                            if result.metric_value is not None and (
+                                open_incident.peak_value is None
+                                or result.metric_value > open_incident.peak_value
+                            ):
+                                open_incident.peak_value = result.metric_value
+                            open_incident.confidence = result.ensemble_score
+
                 elif result.severity == 'Low':
                     logger.debug(
                         'SUPPRESSED low-severity anomaly for %s %s score=%.3f',
@@ -465,6 +527,31 @@ async def collect_anomaly_events() -> None:
                         ev.resolved_at = now
                         logger.info('RESOLVED %s — %s score=%.3f',
                                     node.hostname, metric_key, result.ensemble_score)
+
+                    # ── Close linked Incident + Alert ──────────────────────────
+                    open_incident = await session.scalar(
+                        select(Incident).where(and_(
+                            Incident.node_id   == node.id,
+                            Incident.end_time.is_(None),
+                            Incident.description.like(f'%{metric_key}%'),
+                        )).limit(1)
+                    )
+                    if open_incident is not None:
+                        open_incident.end_time = now
+                        open_incident.status   = 'Resolved'
+                        logger.info('INCIDENT resolved for %s — %s', node.hostname, metric_key)
+
+                        # Close the most recent active alert for this node/metric
+                        open_alert = await session.scalar(
+                            select(Alert).where(and_(
+                                Alert.node_id == node.id,
+                                Alert.status  == 'active',
+                                Alert.summary.like(f'%{metric_key}%'),
+                            )).order_by(Alert.alert_time.desc()).limit(1)
+                        )
+                        if open_alert is not None:
+                            open_alert.status = 'resolved'
+                            logger.info('ALERT resolved for %s — %s', node.hostname, metric_key)
 
         await session.commit()
 

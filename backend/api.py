@@ -37,6 +37,8 @@ from backend.services import (
     get_node_processes,
     get_node_health,
     resolve_anomaly,
+    get_incidents_feed,
+    get_alerts_feed,
 )
 
 router = APIRouter()
@@ -114,6 +116,20 @@ async def resolve_node_anomaly(node_id: int, anomaly_id: int):
     if result is None:
         raise HTTPException(status_code=404, detail='Anomaly not found')
     return result
+
+
+# ---------------------------------------------------------------------------
+# Incidents & Alerts feeds
+# ---------------------------------------------------------------------------
+@router.get('/cluster/incidents')
+async def cluster_incidents(limit: int = Query(100, ge=1, le=500)):
+    """All open + recent incidents across the cluster."""
+    return await get_incidents_feed(limit=limit)
+
+@router.get('/cluster/alerts')
+async def cluster_alerts(limit: int = Query(100, ge=1, le=500)):
+    """All active + recent alerts across the cluster."""
+    return await get_alerts_feed(limit=limit)
 
 # ---------------------------------------------------------------------------
 # Infrastructure health
@@ -233,18 +249,22 @@ async def websocket_live(websocket: WebSocket):
     try:
         while True:
             try:
-                overview = await get_cluster_overview()
-                nodes    = await get_nodes()
-                feed     = await get_anomaly_feed(limit=20)
-                summary  = await get_cluster_summary()
+                overview  = await get_cluster_overview()
+                nodes     = await get_nodes()
+                feed      = await get_anomaly_feed(limit=20)
+                summary   = await get_cluster_summary()
+                incidents = await get_incidents_feed(limit=20)
+                alerts    = await get_alerts_feed(limit=20)
                 await websocket.send_text(json.dumps({
                     'type': 'metrics_update',
                     'payload': {
-                        'overview': overview,
-                        'nodes':    nodes,
-                        'feed':     feed,
-                        'summary':  summary,
-                        'ts':       datetime.utcnow().isoformat(),
+                        'overview':  overview,
+                        'nodes':     nodes,
+                        'feed':      feed,
+                        'summary':   summary,
+                        'incidents': incidents,
+                        'alerts':    alerts,
+                        'ts':        datetime.utcnow().isoformat(),
                     }
                 }))
             except Exception as exc:

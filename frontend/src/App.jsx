@@ -1022,6 +1022,8 @@ export default function App() {
   const [summary,      setSummary]      = useState(null);
   const [nodes,        setNodes]        = useState([]);
   const [feed,         setFeed]         = useState([]);
+  const [incidents,    setIncidents]    = useState([]);
+  const [alerts,       setAlerts]       = useState([]);
   const [history,      setHistory]      = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
   const [now,          setNow]          = useState(new Date());
@@ -1031,6 +1033,7 @@ export default function App() {
   const [historyHours, setHistoryHours] = useState(1);
   const [viewMode,     setViewMode]     = useState('cards'); // 'cards' | 'grid' | 'table'
   const [wsStatus,     setWsStatus]     = useState('connecting');
+  const [incAlertTab,  setIncAlertTab]  = useState('incidents'); // 'incidents' | 'alerts'
 
   const currentMetricDef = METRICS[chartMetric];
 
@@ -1052,6 +1055,8 @@ export default function App() {
               setNodes(msg.payload.nodes);
               setFeed(msg.payload.feed);
               setSummary(msg.payload.summary);
+              if (msg.payload.incidents) setIncidents(msg.payload.incidents);
+              if (msg.payload.alerts)    setAlerts(msg.payload.alerts);
               setLastRefresh(new Date());
             }
           } catch (err) {
@@ -1085,6 +1090,12 @@ export default function App() {
     axios.get(`${API}/api/cluster/summary`)
       .then(r => setSummary(r.data))
       .catch(err => console.error('Fetch summary failed', err));
+    axios.get(`${API}/api/cluster/incidents?limit=50`)
+      .then(r => setIncidents(r.data))
+      .catch(() => {});
+    axios.get(`${API}/api/cluster/alerts?limit=50`)
+      .then(r => setAlerts(r.data))
+      .catch(() => {});
     fetchHistory(currentMetricDef.key, historyHours);
     setLastRefresh(new Date());
   }, [fetchHistory, currentMetricDef.key, historyHours]);
@@ -1359,6 +1370,121 @@ export default function App() {
                 );
               })}
             </div>
+          )}
+        </div>
+
+        {/* ── Incidents & Alerts Panel ── */}
+        <div style={{
+          background: 'rgba(255,107,53,0.04)', border: '1px solid rgba(255,107,53,0.15)',
+          borderRadius: 16, padding: '18px 20px',
+        }}>
+          {/* Panel header + tab switcher */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#ff6b35' }}>
+              📋 Incidents &amp; Alerts
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[{key:'incidents',label:`📋 Incidents (${incidents.filter(i=>i.status==='Active').length} open)`, color:'#ff6b35'},
+                {key:'alerts',   label:`🔔 Alerts (${alerts.filter(a=>a.status==='active').length} active)`,   color:'#9b8fff'}]
+                .map(tab => (
+                  <button key={tab.key} onClick={() => setIncAlertTab(tab.key)} style={{
+                    padding: '5px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600, border: 'none',
+                    background: incAlertTab === tab.key ? `${tab.color}20` : 'transparent',
+                    color: incAlertTab === tab.key ? tab.color : '#888',
+                    transition: 'all 0.15s',
+                  }}>{tab.label}</button>
+                ))}
+            </div>
+          </div>
+
+          {/* Incidents list */}
+          {incAlertTab === 'incidents' && (
+            incidents.length === 0 ? (
+              <div style={{ color: '#4ade80', fontSize: 12 }}>✅ No incidents in the last 48 hours</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
+                {incidents.map(inc => {
+                  const sc = severityColor(inc.severity);
+                  const isOpen = inc.status === 'Active';
+                  const startMs = new Date(inc.start_time + 'Z').getTime();
+                  const endMs   = inc.end_time ? new Date(inc.end_time + 'Z').getTime() : Date.now();
+                  const duration = Math.round((endMs - startMs) / 60000);
+                  return (
+                    <div key={inc.id} style={{
+                      background: isOpen ? `${sc}0c` : 'rgba(74,222,128,0.05)',
+                      border: `1px solid ${isOpen ? sc : '#4ade80'}28`,
+                      borderLeft: `3px solid ${isOpen ? sc : '#4ade80'}`,
+                      borderRadius: 10, padding: '12px 14px',
+                      opacity: isOpen ? 1 : 0.7,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, fontSize: 12, color: isOpen ? sc : '#4ade80' }}>
+                            {isOpen ? '🔴' : '✅'} {inc.severity || 'Unknown'}
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#555', background: 'rgba(0,0,0,0.05)', padding: '1px 7px', borderRadius: 4 }}>
+                            {inc.hostname}
+                          </span>
+                          <span style={{ fontSize: 10, color: '#888', padding: '1px 6px', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 4 }}>
+                            {isOpen ? 'OPEN' : 'RESOLVED'}
+                          </span>
+                          {inc.confidence != null && (
+                            <span style={{ fontSize: 10, color: '#aaa' }}>conf: {(inc.confidence * 100).toFixed(0)}%</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#666', textAlign: 'right', whiteSpace: 'nowrap', marginLeft: 8 }}>
+                          <div>{fmtDate(inc.start_time)}</div>
+                          <div style={{ color: '#aaa' }}>{duration}m {isOpen ? 'ongoing' : 'duration'}</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#666' }}>{inc.description}</div>
+                      {inc.peak_value != null && (
+                        <div style={{ fontSize: 10, color: '#aaa', marginTop: 3 }}>Peak: {inc.peak_value.toFixed(2)}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {/* Alerts list */}
+          {incAlertTab === 'alerts' && (
+            alerts.length === 0 ? (
+              <div style={{ color: '#4ade80', fontSize: 12 }}>✅ No alerts in the last 48 hours</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
+                {alerts.map(al => {
+                  const sc = severityColor(al.severity);
+                  const isActive = al.status === 'active';
+                  return (
+                    <div key={al.id} style={{
+                      background: isActive ? `${sc}0c` : 'rgba(74,222,128,0.05)',
+                      border: `1px solid ${isActive ? sc : '#4ade80'}28`,
+                      borderLeft: `3px solid ${isActive ? sc : '#4ade80'}`,
+                      borderRadius: 10, padding: '12px 14px',
+                      opacity: isActive ? 1 : 0.65,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, fontSize: 12, color: isActive ? sc : '#4ade80' }}>
+                            {isActive ? '🔔' : '✅'} {al.severity || 'Unknown'}
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: '#555', background: 'rgba(0,0,0,0.05)', padding: '1px 7px', borderRadius: 4 }}>
+                            {al.hostname}
+                          </span>
+                          <span style={{ fontSize: 10, color: '#888', padding: '1px 6px', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 4 }}>
+                            {isActive ? 'ACTIVE' : 'RESOLVED'}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, color: '#666' }}>{timeAgo(al.alert_time)}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#666', marginTop: 5 }}>{al.summary}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
 

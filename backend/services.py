@@ -515,3 +515,70 @@ async def get_node_processes(node_id: int) -> list[dict[str, Any]]:
                  } for p in processes
             ]
         }
+
+
+# ---------------------------------------------------------------------------
+# Incidents feed
+# ---------------------------------------------------------------------------
+async def get_incidents_feed(limit: int = 100) -> list[dict[str, Any]]:
+    """Return open + recently-closed incidents across all nodes, newest first."""
+    async with get_session() as session:
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        rows = (await session.execute(
+            select(Incident, Node.hostname)
+            .join(Node, Node.id == Incident.node_id)
+            .where(
+                # Open incidents OR incidents closed in the last 48 h
+                (Incident.end_time.is_(None)) |
+                (Incident.end_time >= cutoff)
+            )
+            .order_by(desc(Incident.start_time))
+            .limit(limit)
+        )).all()
+        return [
+            {
+                'id':          r.Incident.id,
+                'node_id':     r.Incident.node_id,
+                'hostname':    r.hostname,
+                'start_time':  r.Incident.start_time.isoformat() if r.Incident.start_time else None,
+                'end_time':    r.Incident.end_time.isoformat() if r.Incident.end_time else None,
+                'peak_value':  r.Incident.peak_value,
+                'status':      r.Incident.status,
+                'confidence':  r.Incident.confidence,
+                'severity':    r.Incident.severity,
+                'description': r.Incident.description,
+            }
+            for r in rows
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Alerts feed
+# ---------------------------------------------------------------------------
+async def get_alerts_feed(limit: int = 100) -> list[dict[str, Any]]:
+    """Return active + recently-resolved alerts across all nodes, newest first."""
+    async with get_session() as session:
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        rows = (await session.execute(
+            select(Alert, Node.hostname)
+            .join(Node, Node.id == Alert.node_id)
+            .where(
+                (Alert.status == 'active') |
+                (Alert.alert_time >= cutoff)
+            )
+            .order_by(desc(Alert.alert_time))
+            .limit(limit)
+        )).all()
+        return [
+            {
+                'id':         r.Alert.id,
+                'node_id':    r.Alert.node_id,
+                'hostname':   r.hostname,
+                'alert_time': r.Alert.alert_time.isoformat() if r.Alert.alert_time else None,
+                'severity':   r.Alert.severity,
+                'status':     r.Alert.status,
+                'summary':    r.Alert.summary,
+            }
+            for r in rows
+        ]
+
