@@ -7,17 +7,18 @@ A full-stack AI-powered cluster monitoring system for ONGC field sites. It colle
 ## Table of Contents
 
 1. [Architecture Overview](#1-architecture-overview)
-2. [Prerequisites](#2-prerequisites)
-3. [Step 1 — Clone the Repository](#3-step-1--clone-the-repository)
-4. [Step 2 — Configure SSH Keys](#4-step-2--configure-ssh-keys)
-5. [Step 3 — Configure Environment Variables](#5-step-3--configure-environment-variables)
-6. [Step 4 — Register Your Nodes](#6-step-4--register-your-nodes)
-7. [Step 5 — Build and Start with Docker](#7-step-5--build-and-start-with-docker)
-8. [Step 6 — Verify Everything is Running](#8-step-6--verify-everything-is-running)
-9. [Accessing the Dashboard](#9-accessing-the-dashboard)
-10. [Installing Node Exporter on Linux Nodes](#10-installing-node-exporter-on-linux-nodes)
-11. [Stopping and Restarting](#11-stopping-and-restarting)
-12. [Troubleshooting](#12-troubleshooting)
+2. [Recent Updates (July 2026)](#2-recent-updates-july-2026)
+3. [Prerequisites](#3-prerequisites)
+4. [Step 1 — Clone the Repository](#4-step-1--clone-the-repository)
+5. [Step 2 — Configure SSH Keys](#5-step-2--configure-ssh-keys)
+6. [Step 3 — Configure Environment Variables](#6-step-3--configure-environment-variables)
+7. [Step 4 — Register Your Nodes](#7-step-4--register-your-nodes)
+8. [Step 5 — Build and Start with Docker](#8-step-5--build-and-start-with-docker)
+9. [Step 6 — Verify Everything is Running](#9-step-6--verify-everything-is-running)
+10. [Accessing the Dashboard](#10-accessing-the-dashboard)
+11. [Installing Node Exporter on Linux Nodes](#11-installing-node-exporter-on-linux-nodes)
+12. [Stopping and Restarting](#12-stopping-andrestarting)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
@@ -46,7 +47,18 @@ A full-stack AI-powered cluster monitoring system for ONGC field sites. It colle
 
 ---
 
-## 2. Prerequisites
+## 2. Recent Updates (July 2026)
+
+The application has been finalized with the following production-ready features:
+
+* **Machine Learning Baseline Backfilling:** Anomaly detection models (Z-Score, EWMA, Isolation Forest) now automatically seed themselves by computing `mean`, `std`, `p95`, and `p99` baselines from up to 7 days of historical metric data. This ensures intelligent anomaly detection is accurate the moment the system starts.
+* **Deep OS Metadata via SSH:** The backend now actively fetches precise `os_version`, `architecture`, and `boot_time` (calculated from `/proc/uptime`) via SSH. These details are proudly displayed in the Node Drilldown UI.
+* **Process Sanitization:** The frontend's Top 20 Process list has been sanitized. Internal monitoring commands (e.g., `ps aux`, `sshd-session`) are dynamically filtered out to show only genuine cluster workloads.
+* **Incident Lifecycle Automation:** When an anomaly is resolved manually from the UI, the resolution cascades instantly through the database to close associated Incidents and Alerts, maintaining perfect system state synchronization.
+
+---
+
+## 3. Prerequisites
 
 Install the following on the **monitoring PC (Windows)** before you begin:
 
@@ -59,7 +71,7 @@ Install the following on the **monitoring PC (Windows)** before you begin:
 
 ---
 
-## 3. Step 1 — Clone the Repository
+## 4. Step 1 — Clone the Repository
 
 Open **PowerShell** and run:
 
@@ -72,7 +84,7 @@ cd ongc-cluster-monitor
 
 ---
 
-## 4. Step 2 — Configure SSH Keys
+## 5. Step 2 — Configure SSH Keys
 
 The backend connects to Linux nodes over SSH to collect process data. You need an SSH private key that has access to all the nodes.
 
@@ -103,7 +115,7 @@ type "$env:USERPROFILE\.ssh\id_rsa.pub" | ssh USERNAME@NODE_IP "mkdir -p ~/.ssh 
 
 ---
 
-## 5. Step 3 — Configure Environment Variables
+## 6. Step 3 — Configure Environment Variables
 
 Copy the example environment file:
 
@@ -140,9 +152,9 @@ ALERT_EMAIL_TO=alerts@example.com
 
 ---
 
-## 6. Step 4 — Register Your Nodes
+## 7. Step 4 — Register Your Nodes
 
-### 6a. Edit nodes list for Prometheus
+### 7a. Edit nodes list for Prometheus
 
 Open `config/nodes.yaml` and replace the example IPs with your actual node IP addresses:
 
@@ -156,7 +168,7 @@ Open `config/nodes.yaml` and replace the example IPs with your actual node IP ad
     # Add more lines here for additional nodes
 ```
 
-### 6b. Update SSH mount path in docker-compose.yml
+### 7b. Update SSH mount path in docker-compose.yml
 
 Open `docker-compose.yml` and find the `backend` service volumes section.
 
@@ -178,7 +190,7 @@ Open `docker-compose.yml` and find the `backend` service volumes section.
 
 ---
 
-## 7. Step 5 — Build and Start with Docker
+## 8. Step 5 — Build and Start with Docker
 
 From the project root directory in PowerShell, run:
 
