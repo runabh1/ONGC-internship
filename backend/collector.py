@@ -616,6 +616,37 @@ async def collect_node_processes() -> None:
                         'ps aux --no-headers --sort=-%cpu 2>/dev/null | head -20',
                         timeout=10,
                     )
+
+                    # ── Collect node metadata (os, arch, boot_time) ──────────
+                    try:
+                        meta_result = await conn.run(
+                            'uname -s -r -m; awk \'NR==1{printf "%s\n",$1}\' /proc/uptime',
+                            timeout=8,
+                        )
+                        if meta_result.exit_status == 0:
+                            meta_lines = meta_result.stdout.strip().splitlines()
+                            if meta_lines:
+                                uname_parts = meta_lines[0].split()
+                                os_version = ' '.join(uname_parts[:2]) if len(uname_parts) >= 2 else meta_lines[0]
+                                architecture = uname_parts[2] if len(uname_parts) >= 3 else None
+                                uptime_secs = float(meta_lines[1]) if len(meta_lines) > 1 else None
+                                boot_time_dt = (
+                                    datetime.utcnow() - timedelta(seconds=uptime_secs)
+                                ) if uptime_secs is not None else None
+
+                                async with AsyncSessionLocal() as meta_sess:
+                                    meta_node = await meta_sess.get(Node, node.id)
+                                    if meta_node:
+                                        meta_node.os_version    = os_version[:255]
+                                        meta_node.architecture  = architecture[:64] if architecture else None
+                                        if boot_time_dt and not meta_node.boot_time:
+                                            meta_node.boot_time = boot_time_dt
+                                    await meta_sess.commit()
+                                logger.info('Collected metadata from %s: %s %s boot=%s',
+                                            node.hostname, os_version, architecture, boot_time_dt)
+                    except Exception as meta_exc:
+                        logger.debug('Metadata collection failed for %s: %s', ip, meta_exc)
+
                     if result.exit_status != 0 or not result.stdout:
                         continue
 
@@ -626,6 +657,18 @@ async def collect_node_processes() -> None:
 
                     # Parse the top-20 process snapshot for the detailed list.
                     # Columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+                    # Filter out the SSH collector's own processes (sshd-session, ps aux, head)
+                    COLLECTOR_CMD_FILTERS = (
+                        'ps aux --no-headers',
+                        'ps -e --no-headers',
+                        'head -20',
+                        'sshd-session',
+                        'sshd: [',
+                        'awk NR==1',
+                        'uname -s',
+                        '/usr/sbin/sshd',
+                        'bash -c ps aux',
+                    )
                     lines = [l for l in result.stdout.strip().splitlines() if l.strip()]
                     for line in lines:
                         parts = line.split(None, 10)
@@ -639,6 +682,10 @@ async def collect_node_processes() -> None:
                             command  = parts[10][:512]   # full COMMAND
                             username = parts[0][:64]
                         except (ValueError, IndexError):
+                            continue
+
+                        # Skip processes that belong to the SSH collector session itself
+                        if any(f in command for f in COLLECTOR_CMD_FILTERS):
                             continue
 
                         session.add(NodeProcess(
@@ -773,6 +820,81 @@ async def collect_demo_metrics() -> None:
         await collect_node_processes()
     except Exception as exc:
         logger.warning('Initial process collection failed (will retry): %s', exc)
+    # Backfill baselines from any existing metric history
+    try:
+        await backfill_baselines()
+    except Exception as exc:
+        logger.warning('Baseline backfill failed (will retry in main loop): %s', exc)
+
+
+# ---------------------------------------------------------------------------
+# Baseline backfill — run at startup and periodically
+# ---------------------------------------------------------------------------
+async def backfill_baselines() -> None:
+    """
+    Compute NodeBaseline from metric_history for every (node, metric) that
+    has no baseline yet.  Uses all available history (up to the last 7 days).
+    Seeds the in-memory ensemble so anomaly detection is immediately accurate.
+    """
+    now = datetime.utcnow()
+    window_start = now - timedelta(days=7)
+
+    async with AsyncSessionLocal() as session:
+        nodes = (await session.execute(select(Node))).scalars().all()
+
+        for node in nodes:
+            for metric_name in ANOMALY_METRICS:
+                # Only backfill if no baseline exists yet
+                existing = await session.scalar(
+                    select(NodeBaseline).where(and_(
+                        NodeBaseline.node_id     == node.id,
+                        NodeBaseline.metric_name == metric_name,
+                    ))
+                )
+                if existing is not None:
+                    continue  # already has a baseline — skip
+
+                rows = (await session.execute(
+                    select(MetricHistory.value)
+                    .where(and_(
+                        MetricHistory.node_id     == node.id,
+                        MetricHistory.metric_name == metric_name,
+                        MetricHistory.timestamp   >= window_start,
+                    ))
+                )).scalars().all()
+
+                if len(rows) < 5:
+                    logger.debug(
+                        'Not enough history to backfill baseline for %s/%s (%d rows)',
+                        node.hostname, metric_name, len(rows)
+                    )
+                    continue
+
+                arr  = np.array([float(v) for v in rows])
+                mean = float(np.mean(arr))
+                std  = float(max(np.std(arr), 0.01))
+                p95  = float(np.percentile(arr, 95))
+                p99  = float(np.percentile(arr, 99))
+
+                session.add(NodeBaseline(
+                    node_id=node.id, metric_name=metric_name,
+                    mean=mean, std=std, p95=p95, p99=p99,
+                ))
+
+                # Immediately seed the in-memory ensemble with the new baseline
+                try:
+                    from ml.ensemble import seed_ensemble_from_baseline
+                    seed_ensemble_from_baseline(node.id, metric_name, mean, std)
+                except Exception as exc:
+                    logger.debug('Ensemble seed failed for %s/%s: %s',
+                                 node.hostname, metric_name, exc)
+
+                logger.info(
+                    'BACKFILLED baseline [%s] %s — mean=%.2f std=%.2f p95=%.2f (%d rows)',
+                    node.hostname, metric_name, mean, std, p95, len(rows)
+                )
+
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -784,11 +906,18 @@ async def run_collector() -> None:
     await register_yaml_nodes()
     logger.info('Collector started — Prometheus: %s | Interval: %ds | Warmup: %ds',
                 PROM_URL, COLLECT_INTERVAL, WARMUP_SECONDS)
+    # Backfill baselines once at startup so detectors are immediately seeded
+    try:
+        await backfill_baselines()
+    except Exception as exc:
+        logger.warning('Initial baseline backfill failed: %s', exc)
     while True:
         try:
             await collect_prometheus_metrics()
             await collect_anomaly_events()
             await collect_node_processes()
+            # Re-run backfill each cycle so newly online nodes get baselines
+            await backfill_baselines()
         except Exception as exc:
             logger.error('Collector cycle error: %s', exc)
         await asyncio.sleep(COLLECT_INTERVAL)

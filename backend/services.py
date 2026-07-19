@@ -402,8 +402,34 @@ async def resolve_anomaly(node_id: int, anomaly_id: int) -> dict[str, Any] | Non
         ev = await session.get(AnomalyEvent, anomaly_id)
         if ev is None or ev.node_id != node_id:
             return None
+        now = datetime.utcnow()
         ev.resolved    = True
-        ev.resolved_at = datetime.utcnow()
+        ev.resolved_at = now
+
+        # Also close linked Incident (matched by node + metric keyword in description)
+        if ev.metric_name:
+            open_incident = await session.scalar(
+                select(Incident).where(and_(
+                    Incident.node_id   == node_id,
+                    Incident.end_time.is_(None),
+                    Incident.description.like(f'%{ev.metric_name}%'),
+                )).limit(1)
+            )
+            if open_incident is not None:
+                open_incident.end_time = now
+                open_incident.status   = 'Resolved'
+
+                # Close the corresponding active Alert too
+                open_alert = await session.scalar(
+                    select(Alert).where(and_(
+                        Alert.node_id == node_id,
+                        Alert.status  == 'active',
+                        Alert.summary.like(f'%{ev.metric_name}%'),
+                    )).order_by(Alert.alert_time.desc()).limit(1)
+                )
+                if open_alert is not None:
+                    open_alert.status = 'resolved'
+
         await session.commit()
         return {'id': ev.id, 'resolved': True, 'resolved_at': ev.resolved_at.isoformat()}
 

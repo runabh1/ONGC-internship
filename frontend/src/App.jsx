@@ -708,6 +708,31 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
           <div>
             <div style={{ fontWeight: 800, fontSize: 18, color: '#0f172a' }}>{node.hostname}</div>
             <div style={{ fontSize: 12, color: '#475569' }}>{node.ip_address}</div>
+            {/* OS + architecture + uptime */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 5 }}>
+              {node.os_version && (
+                <span style={{ fontSize: 10, background: 'rgba(0,212,255,0.1)', color: '#00d4ff', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                  🐧 {node.os_version}
+                </span>
+              )}
+              {node.architecture && (
+                <span style={{ fontSize: 10, background: 'rgba(155,143,255,0.1)', color: '#9b8fff', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                  ⚙️ {node.architecture}
+                </span>
+              )}
+              {node.boot_time && (() => {
+                const upSecs = Math.floor((Date.now() - new Date(node.boot_time + 'Z').getTime()) / 1000);
+                const d = Math.floor(upSecs / 86400);
+                const h = Math.floor((upSecs % 86400) / 3600);
+                const m = Math.floor((upSecs % 3600) / 60);
+                const uptimeStr = d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+                return (
+                  <span style={{ fontSize: 10, background: 'rgba(74,222,128,0.1)', color: '#4ade80', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                    ⏱ Up {uptimeStr}
+                  </span>
+                );
+              })()}
+            </div>
             {node.status === 'warmup' && (
               <div style={{ fontSize: 11, color: '#a855f7', marginTop: 4 }}>
                 ⏳ Warmup mode — anomaly detection activates after {node.warmup_ends_at ? fmtTime(node.warmup_ends_at) : '…'}
