@@ -1264,7 +1264,7 @@ export default function App() {
           <div style={{ fontSize: 20 }}>🖥️</div>
           <div>
             <div style={{ fontWeight: 800, fontSize: 15, color: '#0f172a', letterSpacing: 0.5 }}>
-              ONGC AI Cluster Monitor
+              AI Cluster Monitor
             </div>
             <div style={{ fontSize: 10, color: '#444', letterSpacing: 1 }}>
               HPC DASHBOARD
