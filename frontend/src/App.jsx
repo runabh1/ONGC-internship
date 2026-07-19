@@ -622,6 +622,7 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
   const [tab, setTab]         = useState('overview');
   const [anomalies, setAnomalies] = useState([]);
   const [health, setHealth]   = useState(null);
+  const [baselines, setBaselines] = useState([]);
   const [metrics, setMetrics] = useState([]);
   const [users, setUsers]     = useState([]);
   const [processes, setProcesses] = useState([]);
@@ -633,6 +634,8 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
       .then(r => setAnomalies(r.data)).catch(() => {});
     axios.get(`${API}/api/cluster/node/${node.id}/health`)
       .then(r => setHealth(r.data)).catch(() => {});
+    axios.get(`${API}/api/cluster/node/${node.id}/baselines`)
+      .then(r => setBaselines(r.data)).catch(() => {});
     axios.get(`${API}/api/cluster/node/${node.id}/metrics?limit=200`)
       .then(r => setMetrics(r.data)).catch(() => {});
     axios.get(`${API}/api/cluster/node/${node.id}/users`)
@@ -1007,31 +1010,85 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
 
         {/* Health tab */}
         {tab === 'health' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {!health || !health.checks || health.checks.length === 0 ? (
-              <div style={{ color: '#555', padding: 20, textAlign: 'center' }}>
-                No health check data yet — checks run every 30s
-              </div>
-            ) : (
-              health.checks.map(c => (
-                <div key={c.check_type} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 16px',
-                  border: `1px solid ${c.passed ? '#4ade8030' : '#ff475730'}`,
-                }}>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <div style={{ fontSize: 18 }}>{c.passed ? '✅' : '❌'}</div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', textTransform: 'uppercase' }}>
-                        {c.check_type.replace('_', ' ')}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#666' }}>{c.detail}</div>
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 10, color: '#555' }}>{fmtDate(c.checked_at)}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Infra checks */}
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>🔬 Infrastructure Checks</div>
+              {!health || !health.checks || health.checks.length === 0 ? (
+                <div style={{ color: '#555', padding: 16, textAlign: 'center', fontSize: 12 }}>
+                  No health check data yet — checks run every 30s
                 </div>
-              ))
-            )}
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {health.checks.map(c => (
+                    <div key={c.check_type} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      background: c.passed ? 'rgba(74,222,128,0.05)' : 'rgba(255,71,87,0.05)',
+                      borderRadius: 10, padding: '12px 16px',
+                      border: `1px solid ${c.passed ? '#4ade8030' : '#ff475730'}`,
+                    }}>
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        <div style={{ fontSize: 18 }}>{c.passed ? '✅' : '❌'}</div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', textTransform: 'uppercase' }}>
+                            {c.check_type.replace('_', ' ')}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#666' }}>{c.detail}</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#555' }}>{fmtDate(c.checked_at)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ML Baselines */}
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>🤖 ML Anomaly Baselines</div>
+              {baselines.length === 0 ? (
+                <div style={{ color: '#888', padding: '12px 16px', fontSize: 12,
+                  background: 'rgba(255,179,71,0.07)', border: '1px solid rgba(255,179,71,0.2)',
+                  borderRadius: 10 }}>
+                  ⏳ No baselines yet — will be computed automatically from metric history
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                    <thead>
+                      <tr>
+                        {['Metric', 'Mean', 'Std Dev', 'P95', 'P99'].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '8px 10px', fontSize: 10, color: '#475569',
+                            fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5,
+                            borderBottom: '1px solid rgba(148,163,184,0.2)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {baselines.map((b, i) => (
+                        <tr key={b.metric_name} style={{ background: i % 2 === 0 ? 'rgba(248,250,252,0.8)' : 'transparent' }}>
+                          <td style={{ padding: '7px 10px', fontWeight: 600, color: '#0f172a' }}>
+                            {b.metric_name.replace(/_/g, ' ')}
+                          </td>
+                          <td style={{ padding: '7px 10px', color: '#00d4ff', fontFamily: 'monospace' }}>
+                            {b.mean != null ? b.mean.toFixed(2) : '—'}
+                          </td>
+                          <td style={{ padding: '7px 10px', color: '#9b8fff', fontFamily: 'monospace' }}>
+                            {b.std != null ? b.std.toFixed(3) : '—'}
+                          </td>
+                          <td style={{ padding: '7px 10px', color: '#ffb347', fontFamily: 'monospace' }}>
+                            {b.p95 != null ? b.p95.toFixed(2) : '—'}
+                          </td>
+                          <td style={{ padding: '7px 10px', color: '#ff6b35', fontFamily: 'monospace' }}>
+                            {b.p99 != null ? b.p99.toFixed(2) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

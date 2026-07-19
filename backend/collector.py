@@ -619,31 +619,37 @@ async def collect_node_processes() -> None:
 
                     # ── Collect node metadata (os, arch, boot_time) ──────────
                     try:
-                        meta_result = await conn.run(
-                            'uname -s -r -m; awk \'NR==1{printf "%s\n",$1}\' /proc/uptime',
+                        uname_result = await conn.run(
+                            'uname -s -r -m',
                             timeout=8,
                         )
-                        if meta_result.exit_status == 0:
-                            meta_lines = meta_result.stdout.strip().splitlines()
-                            if meta_lines:
-                                uname_parts = meta_lines[0].split()
-                                os_version = ' '.join(uname_parts[:2]) if len(uname_parts) >= 2 else meta_lines[0]
-                                architecture = uname_parts[2] if len(uname_parts) >= 3 else None
-                                uptime_secs = float(meta_lines[1]) if len(meta_lines) > 1 else None
-                                boot_time_dt = (
-                                    datetime.utcnow() - timedelta(seconds=uptime_secs)
-                                ) if uptime_secs is not None else None
+                        uptime_result = await conn.run(
+                            'cat /proc/uptime',
+                            timeout=8,
+                        )
+                        if uname_result.exit_status == 0:
+                            uname_line = uname_result.stdout.strip()
+                            uname_parts = uname_line.split()
+                            os_version   = ' '.join(uname_parts[:2]) if len(uname_parts) >= 2 else uname_line
+                            architecture = uname_parts[2] if len(uname_parts) >= 3 else None
+                            boot_time_dt = None
+                            if uptime_result.exit_status == 0:
+                                try:
+                                    uptime_secs = float(uptime_result.stdout.strip().split()[0])
+                                    boot_time_dt = datetime.utcnow() - timedelta(seconds=uptime_secs)
+                                except (ValueError, IndexError):
+                                    pass
 
-                                async with AsyncSessionLocal() as meta_sess:
-                                    meta_node = await meta_sess.get(Node, node.id)
-                                    if meta_node:
-                                        meta_node.os_version    = os_version[:255]
-                                        meta_node.architecture  = architecture[:64] if architecture else None
-                                        if boot_time_dt and not meta_node.boot_time:
-                                            meta_node.boot_time = boot_time_dt
-                                    await meta_sess.commit()
-                                logger.info('Collected metadata from %s: %s %s boot=%s',
-                                            node.hostname, os_version, architecture, boot_time_dt)
+                            async with AsyncSessionLocal() as meta_sess:
+                                meta_node = await meta_sess.get(Node, node.id)
+                                if meta_node:
+                                    meta_node.os_version   = os_version[:255]
+                                    meta_node.architecture = architecture[:64] if architecture else None
+                                    if boot_time_dt and not meta_node.boot_time:
+                                        meta_node.boot_time = boot_time_dt
+                                await meta_sess.commit()
+                            logger.info('Collected metadata from %s: %s %s',
+                                        node.hostname, os_version, architecture)
                     except Exception as meta_exc:
                         logger.debug('Metadata collection failed for %s: %s', ip, meta_exc)
 
