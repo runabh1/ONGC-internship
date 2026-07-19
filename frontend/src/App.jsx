@@ -13,63 +13,63 @@ const WS_URL = process.env.REACT_APP_WS_URL || `${window.location.protocol === '
    METRIC DEFINITIONS
    ───────────────────────────────────────────────────────────────────────── */
 const METRICS = {
-  'CPU Used %':       { key: 'cpu_used_pct',       unit: '%',   color: '#7dd3fc', category: 'CPU' },
-  'CPU Idle %':       { key: 'cpu_idle_pct',       unit: '%',   color: '#86efac', category: 'CPU' },
-  'CPU User %':       { key: 'cpu_user_pct',       unit: '%',   color: '#bae6fd', category: 'CPU' },
-  'CPU System %':     { key: 'cpu_system_pct',     unit: '%',   color: '#c4b5fd', category: 'CPU' },
-  'IOWait %':         { key: 'cpu_iowait_pct',     unit: '%',   color: '#fdba74', category: 'CPU' },
-  'Memory Used %':    { key: 'memory_used_pct',    unit: '%',   color: '#ddd6fe', category: 'Memory' },
-  'Memory Total GB':  { key: 'memory_total_gb',    unit: 'GB',  color: '#fbcfe8', category: 'Memory' },
-  'Load (1m)':        { key: 'load_one',           unit: '',    color: '#a7f3d0', category: 'Load' },
-  'Load (5m)':        { key: 'load_five',          unit: '',    color: '#d9f99d', category: 'Load' },
-  'Load (15m)':       { key: 'load_fifteen',       unit: '',    color: '#a5f3fc', category: 'Load' },
-  'Net RX (B/s)':     { key: 'net_rx_bytes',       unit: 'B/s', color: '#fde68a', category: 'Network' },
-  'Net TX (B/s)':     { key: 'net_tx_bytes',       unit: 'B/s', color: '#fbcfe8', category: 'Network' },
-  'Disk Used %':      { key: 'disk_used_pct',      unit: '%',   color: '#fef08a', category: 'Disk' },
-  'Disk Read (B/s)':  { key: 'disk_read_bytes',    unit: 'B/s', color: '#bfdbfe', category: 'Disk' },
-  'Disk Write (B/s)': { key: 'disk_write_bytes',   unit: 'B/s', color: '#bae6fd', category: 'Disk' },
-  'Procs Running':    { key: 'procs_running',      unit: '',    color: '#c7d2fe', category: 'Processes' },
-  'Procs Blocked':    { key: 'procs_blocked',      unit: '',    color: '#fbcfe8', category: 'Processes' },
-  'Logged-in Users':  { key: 'node_logind_sessions', unit: 'users', color: '#fde68a', category: 'Users' },
+  'CPU Used %': { key: 'cpu_used_pct', unit: '%', color: '#7dd3fc', category: 'CPU' },
+  'CPU Idle %': { key: 'cpu_idle_pct', unit: '%', color: '#86efac', category: 'CPU' },
+  'CPU User %': { key: 'cpu_user_pct', unit: '%', color: '#bae6fd', category: 'CPU' },
+  'CPU System %': { key: 'cpu_system_pct', unit: '%', color: '#c4b5fd', category: 'CPU' },
+  'IOWait %': { key: 'cpu_iowait_pct', unit: '%', color: '#fdba74', category: 'CPU' },
+  'Memory Used %': { key: 'memory_used_pct', unit: '%', color: '#ddd6fe', category: 'Memory' },
+  'Memory Total GB': { key: 'memory_total_gb', unit: 'GB', color: '#fbcfe8', category: 'Memory' },
+  'Load (1m)': { key: 'load_one', unit: '', color: '#a7f3d0', category: 'Load' },
+  'Load (5m)': { key: 'load_five', unit: '', color: '#d9f99d', category: 'Load' },
+  'Load (15m)': { key: 'load_fifteen', unit: '', color: '#a5f3fc', category: 'Load' },
+  'Net RX (B/s)': { key: 'net_rx_bytes', unit: 'B/s', color: '#fde68a', category: 'Network' },
+  'Net TX (B/s)': { key: 'net_tx_bytes', unit: 'B/s', color: '#fbcfe8', category: 'Network' },
+  'Disk Used %': { key: 'disk_used_pct', unit: '%', color: '#fef08a', category: 'Disk' },
+  'Disk Read (B/s)': { key: 'disk_read_bytes', unit: 'B/s', color: '#bfdbfe', category: 'Disk' },
+  'Disk Write (B/s)': { key: 'disk_write_bytes', unit: 'B/s', color: '#bae6fd', category: 'Disk' },
+  'Procs Running': { key: 'procs_running', unit: '', color: '#c7d2fe', category: 'Processes' },
+  'Procs Blocked': { key: 'procs_blocked', unit: '', color: '#fbcfe8', category: 'Processes' },
+  'Logged-in Users': { key: 'node_logind_sessions', unit: 'users', color: '#fde68a', category: 'Users' },
 };
 
 const METRIC_GROUPS = [
-  { label: 'CPU',      keys: ['cpu_used_pct', 'cpu_idle_pct', 'cpu_user_pct', 'cpu_system_pct', 'cpu_iowait_pct'] },
-  { label: 'Memory',   keys: ['memory_used_pct', 'memory_total_gb'] },
-  { label: 'Load',     keys: ['load_one', 'load_five', 'load_fifteen'] },
-  { label: 'Network',  keys: ['net_rx_bytes', 'net_tx_bytes'] },
-  { label: 'Disk',     keys: ['disk_used_pct', 'disk_read_bytes', 'disk_write_bytes'] },
-  { label: 'Processes',keys: ['procs_running', 'procs_blocked'] },
-  { label: 'Users',    keys: ['node_logind_sessions'] },
+  { label: 'CPU', keys: ['cpu_used_pct', 'cpu_idle_pct', 'cpu_user_pct', 'cpu_system_pct', 'cpu_iowait_pct'] },
+  { label: 'Memory', keys: ['memory_used_pct', 'memory_total_gb'] },
+  { label: 'Load', keys: ['load_one', 'load_five', 'load_fifteen'] },
+  { label: 'Network', keys: ['net_rx_bytes', 'net_tx_bytes'] },
+  { label: 'Disk', keys: ['disk_used_pct', 'disk_read_bytes', 'disk_write_bytes'] },
+  { label: 'Processes', keys: ['procs_running', 'procs_blocked'] },
+  { label: 'Users', keys: ['node_logind_sessions'] },
 ];
 
 // All metrics available in the grid view
 const GRID_METRICS = [
-  { key: 'cpu_used_pct',      label: 'CPU %',       unit: '%',   color: '#7dd3fc' },
-  { key: 'cpu_idle_pct',      label: 'CPU Idle %',  unit: '%',   color: '#86efac' },
-  { key: 'cpu_user_pct',      label: 'CPU User %',  unit: '%',   color: '#bae6fd' },
-  { key: 'cpu_system_pct',    label: 'CPU Sys %',   unit: '%',   color: '#c4b5fd' },
-  { key: 'cpu_iowait_pct',    label: 'IOWait %',    unit: '%',   color: '#fdba74' },
-  { key: 'memory_used_pct',   label: 'MEM %',       unit: '%',   color: '#ddd6fe' },
-  { key: 'memory_total_gb',   label: 'MEM GB',      unit: 'GB',  color: '#fbcfe8' },
-  { key: 'load_one',          label: 'Load 1m',     unit: '',    color: '#a7f3d0' },
-  { key: 'load_five',         label: 'Load 5m',     unit: '',    color: '#d9f99d' },
-  { key: 'load_fifteen',      label: 'Load 15m',    unit: '',    color: '#a5f3fc' },
-  { key: 'net_rx_bytes',      label: 'Net RX',      unit: 'B/s', color: '#fde68a' },
-  { key: 'net_tx_bytes',      label: 'Net TX',      unit: 'B/s', color: '#fbcfe8' },
-  { key: 'disk_used_pct',     label: 'Disk %',      unit: '%',   color: '#fef08a' },
-  { key: 'disk_read_bytes',   label: 'Disk Read',   unit: 'B/s', color: '#bfdbfe' },
-  { key: 'disk_write_bytes',  label: 'Disk Write',  unit: 'B/s', color: '#bae6fd' },
-  { key: 'procs_running',     label: 'Procs',       unit: '',    color: '#c7d2fe' },
-  { key: 'procs_blocked',     label: 'Blocked',     unit: '',    color: '#fbcfe8' },
-  { key: 'node_logind_sessions', label: 'Users',    unit: 'users', color: '#fde68a' },
+  { key: 'cpu_used_pct', label: 'CPU %', unit: '%', color: '#7dd3fc' },
+  { key: 'cpu_idle_pct', label: 'CPU Idle %', unit: '%', color: '#86efac' },
+  { key: 'cpu_user_pct', label: 'CPU User %', unit: '%', color: '#bae6fd' },
+  { key: 'cpu_system_pct', label: 'CPU Sys %', unit: '%', color: '#c4b5fd' },
+  { key: 'cpu_iowait_pct', label: 'IOWait %', unit: '%', color: '#fdba74' },
+  { key: 'memory_used_pct', label: 'MEM %', unit: '%', color: '#ddd6fe' },
+  { key: 'memory_total_gb', label: 'MEM GB', unit: 'GB', color: '#fbcfe8' },
+  { key: 'load_one', label: 'Load 1m', unit: '', color: '#a7f3d0' },
+  { key: 'load_five', label: 'Load 5m', unit: '', color: '#d9f99d' },
+  { key: 'load_fifteen', label: 'Load 15m', unit: '', color: '#a5f3fc' },
+  { key: 'net_rx_bytes', label: 'Net RX', unit: 'B/s', color: '#fde68a' },
+  { key: 'net_tx_bytes', label: 'Net TX', unit: 'B/s', color: '#fbcfe8' },
+  { key: 'disk_used_pct', label: 'Disk %', unit: '%', color: '#fef08a' },
+  { key: 'disk_read_bytes', label: 'Disk Read', unit: 'B/s', color: '#bfdbfe' },
+  { key: 'disk_write_bytes', label: 'Disk Write', unit: 'B/s', color: '#bae6fd' },
+  { key: 'procs_running', label: 'Procs', unit: '', color: '#c7d2fe' },
+  { key: 'procs_blocked', label: 'Blocked', unit: '', color: '#fbcfe8' },
+  { key: 'node_logind_sessions', label: 'Users', unit: 'users', color: '#fde68a' },
 ];
 
 const NODE_COLORS = [
-  '#7dd3fc','#86efac','#fde68a','#fbcfe8','#c4b5fd',
-  '#bfdbfe','#bae6fd','#d9f99d','#fef08a','#c7d2fe',
-  '#fda4af','#fcd34d','#a5f3fc','#d8b4fe','#fda4af',
-  '#e0f2fe','#e9d5ff','#fef3c7','#d9f99d','#fbcfe8',
+  '#7dd3fc', '#86efac', '#fde68a', '#fbcfe8', '#c4b5fd',
+  '#bfdbfe', '#bae6fd', '#d9f99d', '#fef08a', '#c7d2fe',
+  '#fda4af', '#fcd34d', '#a5f3fc', '#d8b4fe', '#fda4af',
+  '#e0f2fe', '#e9d5ff', '#fef3c7', '#d9f99d', '#fbcfe8',
 ];
 
 /* ─────────────────────── Helpers ─────────────────────── */
@@ -117,15 +117,15 @@ const timeAgo = (iso) => {
   const d = toUTC(iso);
   if (!d) return '—';
   const diff = (Date.now() - d.getTime()) / 1000;
-  if (diff < 60)   return `${Math.round(diff)}s ago`;
+  if (diff < 60) return `${Math.round(diff)}s ago`;
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
   return `${Math.round(diff / 3600)}h ago`;
 };
 const fmtBytes = (v) => {
   if (v == null) return '—';
-  if (v < 1024)    return `${v.toFixed(0)} B/s`;
-  if (v < 1048576) return `${(v/1024).toFixed(1)} KB/s`;
-  return `${(v/1048576).toFixed(1)} MB/s`;
+  if (v < 1024) return `${v.toFixed(0)} B/s`;
+  if (v < 1048576) return `${(v / 1024).toFixed(1)} KB/s`;
+  return `${(v / 1048576).toFixed(1)} MB/s`;
 };
 const fmtVal = (v, unit) => {
   if (v == null) return '—';
@@ -137,17 +137,17 @@ const fmtVal = (v, unit) => {
 };
 
 const severityColor = (s) => {
-  const m = { Critical:'#fda4af', High:'#fbbf24', Medium:'#fef08a', Low:'#d9f99d', Normal:'#86efac' };
+  const m = { Critical: '#fda4af', High: '#fbbf24', Medium: '#fef08a', Low: '#d9f99d', Normal: '#86efac' };
   return m[s] || '#86efac';
 };
 
 const STATUS_COLORS = {
-  online:   '#86efac',
-  warning:  '#fde68a',
+  online: '#86efac',
+  warning: '#fde68a',
   critical: '#fda4af',
-  warmup:   '#c4b5fd',
-  offline:  '#94a3b8',
-  unknown:  '#94a3b8',
+  warmup: '#c4b5fd',
+  offline: '#94a3b8',
+  unknown: '#94a3b8',
 };
 
 const nodeStatusColor = (node) => {
@@ -180,13 +180,13 @@ function Sparkline({ data = [], color = '#00d4ff', height = 36 }) {
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={pts} margin={{ top: 1, right: 0, left: 0, bottom: 1 }}>
         <defs>
-          <linearGradient id={`sg-${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%"  stopColor={color} stopOpacity={0.35} />
+          <linearGradient id={`sg-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={color} stopOpacity={0.35} />
             <stop offset="95%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
         <Area type="monotone" dataKey="v" stroke={color} strokeWidth={1.5}
-          fill={`url(#sg-${color.replace('#','')})`} dot={false} isAnimationActive={false} />
+          fill={`url(#sg-${color.replace('#', '')})`} dot={false} isAnimationActive={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -210,14 +210,14 @@ function StatPill({ label, value, color = '#00d4ff', icon }) {
 function ClusterAggBar({ summary }) {
   if (!summary) return null;
   const pills = [
-    { label: 'Avg CPU',   value: summary.avg_cpu  != null ? `${summary.avg_cpu.toFixed(1)}%`  : '—', color: '#00d4ff' },
-    { label: 'Avg MEM',   value: summary.avg_mem  != null ? `${summary.avg_mem.toFixed(1)}%`  : '—', color: '#9b8fff' },
-    { label: 'Load 1m',   value: summary.avg_load_1 != null ? summary.avg_load_1.toFixed(2)  : '—', color: '#4ade80' },
-    { label: 'Load 5m',   value: summary.avg_load_5 != null ? summary.avg_load_5.toFixed(2)  : '—', color: '#a3e635' },
-    { label: 'Load 15m',  value: summary.avg_load_15 != null ? summary.avg_load_15.toFixed(2) : '—', color: '#22d3ee' },
-    { label: 'Avg Disk',  value: summary.avg_disk != null ? `${summary.avg_disk.toFixed(1)}%` : '—', color: '#f7e25a' },
-    { label: 'Net RX',    value: fmtBytes(summary.total_net_rx),  color: '#ffb347' },
-    { label: 'Net TX',    value: fmtBytes(summary.total_net_tx),  color: '#ff6b35' },
+    { label: 'Avg CPU', value: summary.avg_cpu != null ? `${summary.avg_cpu.toFixed(1)}%` : '—', color: '#00d4ff' },
+    { label: 'Avg MEM', value: summary.avg_mem != null ? `${summary.avg_mem.toFixed(1)}%` : '—', color: '#9b8fff' },
+    { label: 'Load 1m', value: summary.avg_load_1 != null ? summary.avg_load_1.toFixed(2) : '—', color: '#4ade80' },
+    { label: 'Load 5m', value: summary.avg_load_5 != null ? summary.avg_load_5.toFixed(2) : '—', color: '#a3e635' },
+    { label: 'Load 15m', value: summary.avg_load_15 != null ? summary.avg_load_15.toFixed(2) : '—', color: '#22d3ee' },
+    { label: 'Avg Disk', value: summary.avg_disk != null ? `${summary.avg_disk.toFixed(1)}%` : '—', color: '#f7e25a' },
+    { label: 'Net RX', value: fmtBytes(summary.total_net_rx), color: '#ffb347' },
+    { label: 'Net TX', value: fmtBytes(summary.total_net_tx), color: '#ff6b35' },
   ];
   return (
     <div style={{
@@ -250,8 +250,8 @@ function ClusterOverviewChart({ rawHistory, allNodes, metricLabel, metricUnit })
         t = row.timestamp.substring(5, 16);
       } else {
         const istDate = toIST(row.timestamp);
-        t = istDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }).split(' ')[0] || 
-            istDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        t = istDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }).split(' ')[0] ||
+          istDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
       if (!timeMap.has(t)) timeMap.set(t, { time: t });
       if (timeMap.get(t)[row.hostname] === undefined) {
@@ -276,7 +276,7 @@ function ClusterOverviewChart({ rawHistory, allNodes, metricLabel, metricUnit })
         <defs>
           {hostnames.map((h, i) => (
             <linearGradient key={h} id={`cg-${i}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor={NODE_COLORS[i % NODE_COLORS.length]} stopOpacity={0.5} />
+              <stop offset="5%" stopColor={NODE_COLORS[i % NODE_COLORS.length]} stopOpacity={0.5} />
               <stop offset="95%" stopColor={NODE_COLORS[i % NODE_COLORS.length]} stopOpacity={0.05} />
             </linearGradient>
           ))}
@@ -300,8 +300,8 @@ function ClusterOverviewChart({ rawHistory, allNodes, metricLabel, metricUnit })
 /* ─────────────────────── Node Card ─────────────────────── */
 function NodeCard({ node, onClick }) {
   const borderColor = nodeStatusColor(node);
-  const cpu  = latestVal(node, 'cpu_used_pct');
-  const mem  = latestVal(node, 'memory_used_pct');
+  const cpu = latestVal(node, 'cpu_used_pct');
+  const mem = latestVal(node, 'memory_used_pct');
   const load = latestVal(node, 'load_one');
   const disk = latestVal(node, 'disk_used_pct');
 
@@ -370,9 +370,9 @@ function NodeCard({ node, onClick }) {
       {/* Sparklines */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
         {[
-          { k: 'cpu_used_pct',    c: '#00d4ff', label: 'CPU' },
+          { k: 'cpu_used_pct', c: '#00d4ff', label: 'CPU' },
           { k: 'memory_used_pct', c: '#9b8fff', label: 'MEM' },
-          { k: 'load_one',        c: '#4ade80', label: 'LD' },
+          { k: 'load_one', c: '#4ade80', label: 'LD' },
         ].map(({ k, c, label }) => (
           <div key={k}>
             <div style={{ fontSize: 9, color: '#444', marginBottom: 1 }}>{label}</div>
@@ -469,21 +469,21 @@ function GridView({ nodes }) {
 
 /* ─────────────────────── Metrics Table ─────────────────────── */
 function MetricsTable({ nodes, onExport }) {
-  const [sortKey, setSortKey]   = useState('hostname');
-  const [sortDir, setSortDir]   = useState('asc');
+  const [sortKey, setSortKey] = useState('hostname');
+  const [sortDir, setSortDir] = useState('asc');
 
   const cols = [
-    { key: 'hostname',      label: 'Node IP',   w: 140 },
-    { key: 'status',        label: 'Status',    w: 90 },
-    { key: 'cpu_used_pct',  label: 'CPU %',     w: 80,  metric: true, unit: '%' },
-    { key: 'memory_used_pct',label:'MEM %',     w: 80,  metric: true, unit: '%' },
-    { key: 'load_one',      label: 'Load',      w: 70,  metric: true, unit: '' },
-    { key: 'disk_used_pct', label: 'Disk %',    w: 80,  metric: true, unit: '%' },
-    { key: 'net_rx_bytes',  label: 'Net RX',    w: 90,  metric: true, unit: 'B/s' },
-    { key: 'net_tx_bytes',  label: 'Net TX',    w: 90,  metric: true, unit: 'B/s' },
-    { key: 'procs_running', label: 'Procs',     w: 70,  metric: true, unit: '' },
-    { key: 'active_anomalies',label:'Anomalies',w: 80 },
-    { key: 'active_users',  label: 'Users',     w: 60 },
+    { key: 'hostname', label: 'Node IP', w: 140 },
+    { key: 'status', label: 'Status', w: 90 },
+    { key: 'cpu_used_pct', label: 'CPU %', w: 80, metric: true, unit: '%' },
+    { key: 'memory_used_pct', label: 'MEM %', w: 80, metric: true, unit: '%' },
+    { key: 'load_one', label: 'Load', w: 70, metric: true, unit: '' },
+    { key: 'disk_used_pct', label: 'Disk %', w: 80, metric: true, unit: '%' },
+    { key: 'net_rx_bytes', label: 'Net RX', w: 90, metric: true, unit: 'B/s' },
+    { key: 'net_tx_bytes', label: 'Net TX', w: 90, metric: true, unit: 'B/s' },
+    { key: 'procs_running', label: 'Procs', w: 70, metric: true, unit: '' },
+    { key: 'active_anomalies', label: 'Anomalies', w: 80 },
+    { key: 'active_users', label: 'Users', w: 60 },
   ];
 
   const getVal = (node, col) => {
@@ -507,12 +507,14 @@ function MetricsTable({ nodes, onExport }) {
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  const thS = { padding: '8px 10px', fontSize: 10, fontWeight: 700, color: '#666',
+  const thS = {
+    padding: '8px 10px', fontSize: 10, fontWeight: 700, color: '#666',
     letterSpacing: 0.8, textTransform: 'uppercase', cursor: 'pointer', userSelect: 'none',
     borderBottom: '1px solid rgba(255,255,255,0.08)', whiteSpace: 'nowrap',
     transition: 'color 0.15s',
   };
-  const tdS = { padding: '7px 10px', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.04)',
+  const tdS = {
+    padding: '7px 10px', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.04)',
     whiteSpace: 'nowrap',
   };
 
@@ -526,10 +528,10 @@ function MetricsTable({ nodes, onExport }) {
       }).join(',')
     ).join('\n');
     const blob = new Blob([headers + '\n' + rows], { type: 'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `cluster_metrics_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.csv`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cluster_metrics_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -539,14 +541,14 @@ function MetricsTable({ nodes, onExport }) {
       const obj = { hostname: node.hostname, status: node.status };
       cols.filter(c => c.metric).forEach(c => { obj[c.key] = getVal(node, c); });
       obj.active_anomalies = node.active_anomalies;
-      obj.active_users     = node.active_users;
+      obj.active_users = node.active_users;
       return obj;
     });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `cluster_metrics_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cluster_metrics_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -564,7 +566,7 @@ function MetricsTable({ nodes, onExport }) {
             <tr>
               {cols.map(c => (
                 <th key={c.key} style={{ ...thS, color: sortKey === c.key ? '#00d4ff' : '#666' }}
-                    onClick={() => toggleSort(c.key)}>
+                  onClick={() => toggleSort(c.key)}>
                   {c.label} {sortKey === c.key ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </th>
               ))}
@@ -619,27 +621,27 @@ const btnStyle = (color) => ({
 
 /* ─────────────────────── Node Drilldown Modal ─────────────────────── */
 function NodeModal({ node, onClose, onResolveAnomaly }) {
-  const [tab, setTab]         = useState('overview');
+  const [tab, setTab] = useState('overview');
   const [anomalies, setAnomalies] = useState([]);
-  const [health, setHealth]   = useState(null);
+  const [health, setHealth] = useState(null);
   const [baselines, setBaselines] = useState([]);
   const [metrics, setMetrics] = useState([]);
-  const [users, setUsers]     = useState([]);
+  const [users, setUsers] = useState([]);
   const [processes, setProcesses] = useState([]);
   const [processesTotal, setProcessesTotal] = useState(0);
 
   useEffect(() => {
     if (!node) return;
     axios.get(`${API}/api/cluster/node/${node.id}/anomalies?limit=20`)
-      .then(r => setAnomalies(r.data)).catch(() => {});
+      .then(r => setAnomalies(r.data)).catch(() => { });
     axios.get(`${API}/api/cluster/node/${node.id}/health`)
-      .then(r => setHealth(r.data)).catch(() => {});
+      .then(r => setHealth(r.data)).catch(() => { });
     axios.get(`${API}/api/cluster/node/${node.id}/baselines`)
-      .then(r => setBaselines(r.data)).catch(() => {});
+      .then(r => setBaselines(r.data)).catch(() => { });
     axios.get(`${API}/api/cluster/node/${node.id}/metrics?limit=200`)
-      .then(r => setMetrics(r.data)).catch(() => {});
+      .then(r => setMetrics(r.data)).catch(() => { });
     axios.get(`${API}/api/cluster/node/${node.id}/users`)
-      .then(r => setUsers(r.data)).catch(() => {});
+      .then(r => setUsers(r.data)).catch(() => { });
     axios.get(`${API}/api/cluster/node/${node.id}/processes`)
       .then(r => {
         // API now returns { total, processes }
@@ -679,12 +681,12 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
   const borderColor = nodeStatusColor(node);
 
   const tabs = [
-    { key: 'overview',  label: '📊 Overview' },
-    { key: 'metrics',   label: '📈 Metrics' },
-    { key: 'users',     label: '👥 Users' },
+    { key: 'overview', label: '📊 Overview' },
+    { key: 'metrics', label: '📈 Metrics' },
+    { key: 'users', label: '👥 Users' },
     { key: 'processes', label: '⚙️ Processes' },
     { key: 'anomalies', label: `🚨 Anomalies (${node.active_anomalies})` },
-    { key: 'health',    label: '🔬 Health' },
+    { key: 'health', label: '🔬 Health' },
   ];
 
   const tabStyle = (active) => ({
@@ -769,14 +771,14 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
             {/* Stat pills */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
               {[
-                { label: 'Active Users',  value: node.active_users ?? 0,  color: '#9b8fff', icon: '👤' },
+                { label: 'Active Users', value: node.active_users ?? 0, color: '#9b8fff', icon: '👤' },
                 { label: 'Procs Running', value: node.running_procs ?? 0, color: '#4ade80', icon: '⚙️' },
-                { label: 'Anomalies',     value: node.active_anomalies,   color: node.active_anomalies > 0 ? '#ff4757' : '#4ade80', icon: '🚨' },
-                { label: 'CPU Used',      value: latestVal(node,'cpu_used_pct')    != null ? `${latestVal(node,'cpu_used_pct').toFixed(1)}%`    : '—', color: '#00d4ff', icon: '🔲' },
-                { label: 'Mem Used',      value: latestVal(node,'memory_used_pct') != null ? `${latestVal(node,'memory_used_pct').toFixed(1)}%` : '—', color: '#9b8fff', icon: '💾' },
-                { label: 'Load (1m)',     value: latestVal(node,'load_one')        != null ? latestVal(node,'load_one').toFixed(2)               : '—', color: '#4ade80', icon: '📈' },
-                { label: 'Net RX',        value: latestVal(node,'net_rx_bytes')    != null ? fmtBytes(latestVal(node,'net_rx_bytes'))            : '—', color: '#ffb347', icon: '📡' },
-                { label: 'Disk Used',     value: latestVal(node,'disk_used_pct')   != null ? `${latestVal(node,'disk_used_pct').toFixed(1)}%`   : '—', color: '#f7e25a', icon: '💿' },
+                { label: 'Anomalies', value: node.active_anomalies, color: node.active_anomalies > 0 ? '#ff4757' : '#4ade80', icon: '🚨' },
+                { label: 'CPU Used', value: latestVal(node, 'cpu_used_pct') != null ? `${latestVal(node, 'cpu_used_pct').toFixed(1)}%` : '—', color: '#00d4ff', icon: '🔲' },
+                { label: 'Mem Used', value: latestVal(node, 'memory_used_pct') != null ? `${latestVal(node, 'memory_used_pct').toFixed(1)}%` : '—', color: '#9b8fff', icon: '💾' },
+                { label: 'Load (1m)', value: latestVal(node, 'load_one') != null ? latestVal(node, 'load_one').toFixed(2) : '—', color: '#4ade80', icon: '📈' },
+                { label: 'Net RX', value: latestVal(node, 'net_rx_bytes') != null ? fmtBytes(latestVal(node, 'net_rx_bytes')) : '—', color: '#ffb347', icon: '📡' },
+                { label: 'Disk Used', value: latestVal(node, 'disk_used_pct') != null ? `${latestVal(node, 'disk_used_pct').toFixed(1)}%` : '—', color: '#f7e25a', icon: '💿' },
               ].map(p => <StatPill key={p.label} {...p} />)}
             </div>
 
@@ -1047,9 +1049,11 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 12, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>🤖 ML Anomaly Baselines</div>
               {baselines.length === 0 ? (
-                <div style={{ color: '#888', padding: '12px 16px', fontSize: 12,
+                <div style={{
+                  color: '#888', padding: '12px 16px', fontSize: 12,
                   background: 'rgba(255,179,71,0.07)', border: '1px solid rgba(255,179,71,0.2)',
-                  borderRadius: 10 }}>
+                  borderRadius: 10
+                }}>
                   ⏳ No baselines yet — will be computed automatically from metric history
                 </div>
               ) : (
@@ -1058,9 +1062,11 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
                     <thead>
                       <tr>
                         {['Metric', 'Mean', 'Std Dev', 'P95', 'P99'].map(h => (
-                          <th key={h} style={{ textAlign: 'left', padding: '8px 10px', fontSize: 10, color: '#475569',
+                          <th key={h} style={{
+                            textAlign: 'left', padding: '8px 10px', fontSize: 10, color: '#475569',
                             fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5,
-                            borderBottom: '1px solid rgba(148,163,184,0.2)' }}>{h}</th>
+                            borderBottom: '1px solid rgba(148,163,184,0.2)'
+                          }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1100,22 +1106,22 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
    Main App
    ───────────────────────────────────────────────────────────────────────── */
 export default function App() {
-  const [overview,     setOverview]     = useState(null);
-  const [summary,      setSummary]      = useState(null);
-  const [nodes,        setNodes]        = useState([]);
-  const [feed,         setFeed]         = useState([]);
-  const [incidents,    setIncidents]    = useState([]);
-  const [alerts,       setAlerts]       = useState([]);
-  const [history,      setHistory]      = useState([]);
+  const [overview, setOverview] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [nodes, setNodes] = useState([]);
+  const [feed, setFeed] = useState([]);
+  const [incidents, setIncidents] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [history, setHistory] = useState([]);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [now,          setNow]          = useState(new Date());
-  const [lastRefresh,  setLastRefresh]  = useState(null);
+  const [now, setNow] = useState(new Date());
+  const [lastRefresh, setLastRefresh] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [chartMetric,  setChartMetric]  = useState('CPU Used %');
+  const [chartMetric, setChartMetric] = useState('CPU Used %');
   const [historyHours, setHistoryHours] = useState(1);
-  const [viewMode,     setViewMode]     = useState('cards'); // 'cards' | 'grid' | 'table'
-  const [wsStatus,     setWsStatus]     = useState('connecting');
-  const [incAlertTab,  setIncAlertTab]  = useState('incidents'); // 'incidents' | 'alerts'
+  const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'grid' | 'table'
+  const [wsStatus, setWsStatus] = useState('connecting');
+  const [incAlertTab, setIncAlertTab] = useState('incidents'); // 'incidents' | 'alerts'
 
   const currentMetricDef = METRICS[chartMetric];
 
@@ -1126,7 +1132,7 @@ export default function App() {
       try {
         const ws = new WebSocket(WS_URL);
         wsRef.current = ws;
-        ws.onopen  = () => setWsStatus('connected');
+        ws.onopen = () => setWsStatus('connected');
         ws.onclose = () => { setWsStatus('reconnecting'); setTimeout(connect, 5000); };
         ws.onerror = (err) => { console.error('WebSocket error', err); setWsStatus('error'); };
         ws.onmessage = (evt) => {
@@ -1138,7 +1144,7 @@ export default function App() {
               setFeed(msg.payload.feed);
               setSummary(msg.payload.summary);
               if (msg.payload.incidents) setIncidents(msg.payload.incidents);
-              if (msg.payload.alerts)    setAlerts(msg.payload.alerts);
+              if (msg.payload.alerts) setAlerts(msg.payload.alerts);
               setLastRefresh(new Date());
             }
           } catch (err) {
@@ -1156,7 +1162,7 @@ export default function App() {
   // --- HTTP polling fallback ---
   const fetchHistory = useCallback((metricKey, hours) => {
     axios.get(`${API}/api/cluster/history?metric=${metricKey}&hours=${hours}`)
-      .then(r => setHistory(r.data)).catch(() => {});
+      .then(r => setHistory(r.data)).catch(() => { });
   }, []);
 
   const fetchAll = useCallback(() => {
@@ -1174,10 +1180,10 @@ export default function App() {
       .catch(err => console.error('Fetch summary failed', err));
     axios.get(`${API}/api/cluster/incidents?limit=50`)
       .then(r => setIncidents(r.data))
-      .catch(() => {});
+      .catch(() => { });
     axios.get(`${API}/api/cluster/alerts?limit=50`)
       .then(r => setAlerts(r.data))
-      .catch(() => {});
+      .catch(() => { });
     fetchHistory(currentMetricDef.key, historyHours);
     setLastRefresh(new Date());
   }, [fetchHistory, currentMetricDef.key, historyHours]);
@@ -1194,7 +1200,7 @@ export default function App() {
   }, [chartMetric, historyHours, fetchHistory, currentMetricDef.key]);
 
   const filtered = nodes.filter(n => {
-    if (filterStatus === 'all')     return true;
+    if (filterStatus === 'all') return true;
     if (filterStatus === 'anomaly') return n.active_anomalies > 0;
     return n.status === filterStatus;
   });
@@ -1207,17 +1213,17 @@ export default function App() {
         const updated = nodes.find(n => n.id === nodeId);
         if (updated) setSelectedNode(updated);
       }
-    } catch {}
+    } catch { }
   };
 
   const statusFilters = [
-    { key: 'all',      label: 'All Nodes' },
-    { key: 'online',   label: '🟢 Online' },
-    { key: 'anomaly',  label: '🔴 Anomaly' },
-    { key: 'warning',  label: '🟡 Warning' },
-    { key: 'warmup',   label: '🟣 Warmup' },
+    { key: 'all', label: 'All Nodes' },
+    { key: 'online', label: '🟢 Online' },
+    { key: 'anomaly', label: '🔴 Anomaly' },
+    { key: 'warning', label: '🟡 Warning' },
+    { key: 'warmup', label: '🟣 Warmup' },
     { key: 'critical', label: '🔴 Critical' },
-    { key: 'offline',  label: '⚫ Offline' },
+    { key: 'offline', label: '⚫ Offline' },
   ];
 
   const wsColor = wsStatus === 'connected' ? '#4ade80' : wsStatus === 'reconnecting' ? '#ffb347' : '#ff4757';
@@ -1261,7 +1267,7 @@ export default function App() {
               ONGC AI Cluster Monitor
             </div>
             <div style={{ fontSize: 10, color: '#444', letterSpacing: 1 }}>
-              GANGLIA-STYLE HPC DASHBOARD
+              HPC DASHBOARD
             </div>
           </div>
           {/* WS indicator */}
@@ -1294,15 +1300,15 @@ export default function App() {
 
         {/* ── Summary Strip ── */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          <StatPill label="Total Nodes"   value={overview?.total_nodes}      color="#00d4ff" icon="🖥️" />
-          <StatPill label="Online"        value={overview?.healthy_nodes}    color="#4ade80" icon="✅" />
-          <StatPill label="Warnings"      value={overview?.warnings}         color="#ffb347" icon="⚠️" />
-          <StatPill label="Critical"      value={overview?.critical}         color="#ff4757" icon="🔴" />
-          <StatPill label="Warmup"        value={overview?.warmup}           color="#a855f7" icon="🟣" />
-          <StatPill label="Offline"       value={overview?.offline}          color="#6c757d" icon="⚫" />
-          <StatPill label="Active Alerts" value={overview?.active_alerts}    color="#9b8fff" icon="🔔" />
-          <StatPill label="Anomalies"     value={overview?.active_anomalies} color={overview?.active_anomalies > 0 ? '#ff4757' : '#4ade80'} icon="🚨" />
-          <StatPill label="Incidents"     value={overview?.active_incidents} color="#ff6b35" icon="📋" />
+          <StatPill label="Total Nodes" value={overview?.total_nodes} color="#00d4ff" icon="🖥️" />
+          <StatPill label="Online" value={overview?.healthy_nodes} color="#4ade80" icon="✅" />
+          <StatPill label="Warnings" value={overview?.warnings} color="#ffb347" icon="⚠️" />
+          <StatPill label="Critical" value={overview?.critical} color="#ff4757" icon="🔴" />
+          <StatPill label="Warmup" value={overview?.warmup} color="#a855f7" icon="🟣" />
+          <StatPill label="Offline" value={overview?.offline} color="#6c757d" icon="⚫" />
+          <StatPill label="Active Alerts" value={overview?.active_alerts} color="#9b8fff" icon="🔔" />
+          <StatPill label="Anomalies" value={overview?.active_anomalies} color={overview?.active_anomalies > 0 ? '#ff4757' : '#4ade80'} icon="🚨" />
+          <StatPill label="Incidents" value={overview?.active_incidents} color="#ff6b35" icon="📋" />
         </div>
 
         {/* ── Ganglia-style Cluster Overview Chart ── */}
@@ -1364,7 +1370,7 @@ export default function App() {
               {/* View mode toggle */}
               {[
                 { mode: 'cards', icon: '⊞', title: 'Card View' },
-                { mode: 'grid',  icon: '⊟', title: 'Grid View (Ganglia-style)' },
+                { mode: 'grid', icon: '⊟', title: 'Grid View (Ganglia-style)' },
                 { mode: 'table', icon: '☰', title: 'Metrics Table' },
               ].map(({ mode, icon, title }) => (
                 <button key={mode} onClick={() => setViewMode(mode)} title={title} style={{
@@ -1466,8 +1472,8 @@ export default function App() {
               📋 Incidents &amp; Alerts
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              {[{key:'incidents',label:`📋 Incidents (${incidents.filter(i=>i.status==='Active').length} open)`, color:'#ff6b35'},
-                {key:'alerts',   label:`🔔 Alerts (${alerts.filter(a=>a.status==='active').length} active)`,   color:'#9b8fff'}]
+              {[{ key: 'incidents', label: `📋 Incidents (${incidents.filter(i => i.status === 'Active').length} open)`, color: '#ff6b35' },
+              { key: 'alerts', label: `🔔 Alerts (${alerts.filter(a => a.status === 'active').length} active)`, color: '#9b8fff' }]
                 .map(tab => (
                   <button key={tab.key} onClick={() => setIncAlertTab(tab.key)} style={{
                     padding: '5px 13px', borderRadius: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600, border: 'none',
@@ -1489,7 +1495,7 @@ export default function App() {
                   const sc = severityColor(inc.severity);
                   const isOpen = inc.status === 'Active';
                   const startMs = new Date(inc.start_time + 'Z').getTime();
-                  const endMs   = inc.end_time ? new Date(inc.end_time + 'Z').getTime() : Date.now();
+                  const endMs = inc.end_time ? new Date(inc.end_time + 'Z').getTime() : Date.now();
                   const duration = Math.round((endMs - startMs) / 60000);
                   return (
                     <div key={inc.id} style={{
