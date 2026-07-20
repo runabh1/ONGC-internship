@@ -1,4 +1,4 @@
-﻿# ONGC AI Cluster Monitor — Complete Setup Guide
+# ONGC AI Cluster Monitor — Complete Setup Guide
 
 > **Monitoring PC:** Windows 10/11
 > **Nodes being monitored:** Linux machines (Ubuntu / CentOS / RHEL etc.)
@@ -17,8 +17,9 @@ This document walks you through **every single step** — from a fresh Windows P
 6. [Phase 5 — Build and Launch with Docker](#phase-5--build-and-launch-with-docker)
 7. [Phase 6 — Verify Everything is Running](#phase-6--verify-everything-is-running)
 8. [Phase 7 — Access the Dashboard](#phase-7--access-the-dashboard)
-9. [Daily Operations Cheatsheet](#daily-operations-cheatsheet)
-10. [Troubleshooting](#troubleshooting)
+9. [Phase 8 — Register Your Nodes (Node Management UI)](#phase-8--register-your-nodes-node-management-ui)
+10. [Daily Operations Cheatsheet](#daily-operations-cheatsheet)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -345,7 +346,9 @@ EMAIL_PASSWORD=
 ALERT_EMAIL_TO=
 ```
 
-> **Critical — Do NOT change `SSH_KEY_PATH`**. The value `/root/.ssh/id_rsa` is the path inside the Docker container. Your Windows `.ssh` folder is mounted into the container automatically (configured in the next step).
+> **Critical — Do NOT change `SSH_KEY_PATH`**. The value `/root/.ssh/id_rsa` is the path inside the Docker container. Your Windows `.ssh` folder is mounted into the container automatically.
+
+> **About `SSH_USERNAME`:** This is the **global default SSH username** used as a fallback when no per-node username is configured. In the ONGC setup, where different Linux nodes may have different user accounts, you can override this per node through the **Settings → Node Management** UI after launching the stack.
 
 ---
 
@@ -377,21 +380,22 @@ Save the file.
 
 ---
 
-### 4.3 Update config/nodes.yaml — add your Linux node IPs
+### 4.3 (Optional) Pre-populate config/nodes.yaml
 
-Open `config/nodes.yaml` in a text editor and replace the example IPs with your real node IPs:
+> **This step is no longer required.** Nodes are now added through the **Settings → Node Management UI** in the dashboard after the stack is running.
+>
+> However, if you prefer to pre-configure nodes before launching, you can still add them to `config/nodes.yaml` and they will be **automatically imported into the database on first startup**:
 
 ```yaml
 - labels:
     job: node_exporter
   targets:
-    - '192.168.1.101:9100'   # Node 1 — replace with your actual IP
-    - '192.168.1.102:9100'   # Node 2 — replace with your actual IP
-    - '192.168.1.103:9100'   # Node 3 — replace with your actual IP
-    # Add more lines here for additional nodes
+    - '192.168.1.101:9100'   # Node 1
+    - '192.168.1.102:9100'   # Node 2
+    - '192.168.1.103:9100'   # Node 3
 ```
 
-> The port must stay `:9100` — that is where node_exporter listens.
+> SSH usernames for pre-seeded nodes default to `SSH_USERNAME` from `.env`. You can update them individually in the UI afterward.
 
 ---
 
@@ -399,9 +403,9 @@ Open `config/nodes.yaml` in a text editor and replace the example IPs with your 
 
 | File | What you changed |
 |------|-----------------|
-| `.env` | Set `SSH_USERNAME`, `POSTGRES_PASSWORD`, `DATABASE_URL` |
+| `.env` | Set `SSH_USERNAME` (default fallback), `POSTGRES_PASSWORD`, `DATABASE_URL` |
 | `docker-compose.yml` | Changed Windows username in SSH volume mount |
-| `config/nodes.yaml` | Put your actual Linux node IP addresses |
+| `config/nodes.yaml` | *(Optional)* Pre-populated node IPs for auto-import |
 
 ---
 
@@ -540,6 +544,76 @@ Once all containers are running, open a browser on the Windows monitoring PC:
 | **Prometheus UI** | http://localhost:9090 | Raw metric queries |
 
 The dashboard starts populating with data within **60 seconds** (one collection cycle). Anomaly detection becomes accurate after **5 minutes** (warmup period ends).
+
+---
+
+## Phase 8 — Register Your Nodes (Node Management UI)
+
+Nodes are registered through the dashboard — **no YAML editing required**.
+
+### 8.1 Open the Settings page
+
+1. Open **http://localhost:3001** in your browser
+2. Click the **⚙️ Settings** button in the top-right of the navigation bar
+
+You will see the **Node Management** page.
+
+### 8.2 Add a node
+
+1. Click **+ Add Node**
+2. Fill in the form:
+
+   | Field | Example | Required? | Notes |
+   |-------|---------|-----------|-------|
+   | **IP Address** | `192.168.1.101` | ✅ Yes | Must be reachable from monitoring PC |
+   | **Label** | `ongc-node-1` | ❌ Optional | Friendly display name |
+   | **SSH Username** | `arunabh` | ❌ Optional | Linux SSH username for **this specific node** |
+   | **Port** | `9100` | ✅ Yes (default) | node_exporter port — usually leave as 9100 |
+
+3. Click **🔍 Validate Connectivity** to verify the node is reachable before saving:
+   - **Ping** — ICMP check
+   - **Port 9100** — TCP check to node_exporter
+   - **SSH** — Key-based connection test
+
+4. Click **💾 Save Node**
+
+> **What happens automatically when you save:**
+> 1. Node is written to the PostgreSQL database
+> 2. `config/nodes.yaml` is regenerated on disk
+> 3. Prometheus is reloaded via `POST /-/reload` (hot-reload, no container restart)
+> 4. Node appears in the dashboard within ~60 seconds
+
+### 8.3 Per-node SSH usernames (important for ONGC setup)
+
+In a typical ONGC cluster, **different servers may have different Linux usernames**. This is fully supported:
+
+```
+Node 192.168.1.101  →  SSH Username: arunabh    (set individually in the UI)
+Node 192.168.1.102  →  SSH Username: oilrig     (set individually in the UI)
+Node 192.168.1.103  →  SSH Username: (empty)    → uses SSH_USERNAME from .env
+```
+
+**How the fallback chain works:**
+1. If a node has an SSH username set in the UI → that username is used
+2. If the SSH username field is empty → falls back to `SSH_USERNAME` in `.env`
+
+This applies to all three SSH-based operations:
+- Process data collection (top 20 processes)
+- SSH health checks
+- Live connectivity validation from the Settings UI
+
+### 8.4 Managing existing nodes
+
+From the Settings page you can also:
+
+| Action | Button | Effect |
+|--------|--------|--------|
+| **Validate** | 🔍 | Re-run connectivity check on a saved node |
+| **Edit** | ✏️ | Change IP, label, SSH username, or port |
+| **Toggle** | ● ON / ○ OFF | Temporarily pause monitoring for a node |
+| **Delete** | 🗑️ | Remove node from monitoring + Prometheus targets |
+
+All changes take effect immediately — Prometheus is reloaded automatically.
 
 ---
 

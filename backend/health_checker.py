@@ -135,14 +135,14 @@ async def _check_prometheus_scrape(ip: str, session: aiohttp.ClientSession) -> t
         return False, f'error: {exc}'
 
 
-async def _check_ssh(ip: str) -> tuple[bool, str]:
+async def _check_ssh(ip: str, username: str) -> tuple[bool, str]:
     """Lightweight SSH connectivity check using asyncssh (skipped if no key configured)."""
     if not SSH_KEY_PATH:
         return True, 'SSH check skipped (SSH_KEY_PATH not configured)'
     try:
         import asyncssh  # type: ignore
         async with asyncssh.connect(
-            ip, username=SSH_USERNAME,
+            ip, username=username,
             client_keys=[SSH_KEY_PATH],
             known_hosts=None,
             connect_timeout=5,
@@ -159,14 +159,14 @@ async def _check_ssh(ip: str) -> tuple[bool, str]:
 # Per-node health check
 # ---------------------------------------------------------------------------
 
-async def check_node(node: Node, http_session: aiohttp.ClientSession) -> dict:
+async def check_node(node: Node, http_session: aiohttp.ClientSession, target_user: str) -> dict:
     """Run all 4 checks for a node. Returns dict of results."""
     ip = node.ip_address or node.hostname
 
     ping_ok,   ping_detail   = await _check_ping(ip)
     ne_ok,     ne_detail     = await _check_node_exporter(ip, http_session)
     prom_ok,   prom_detail   = await _check_prometheus_scrape(ip, http_session)
-    ssh_ok,    ssh_detail    = await _check_ssh(ip)
+    ssh_ok,    ssh_detail    = await _check_ssh(ip, target_user)
 
     results = {
         'ping':          (ping_ok,  ping_detail),
@@ -208,14 +208,30 @@ async def run_health_checker() -> None:
 async def _health_check_cycle() -> None:
     now = datetime.utcnow()
 
+    from backend.models import ManagedNode
+
     async with AsyncSessionLocal() as session:
         nodes = (await session.execute(select(Node))).scalars().all()
         if not nodes:
             return
 
+        # Build IP → ssh_username map; fall back to global SSH_USERNAME per node
+        managed_rows = (await session.execute(select(ManagedNode))).scalars().all()
+        ssh_user_map = {
+            mn.ip_address: (mn.ssh_username or SSH_USERNAME)
+            for mn in managed_rows
+        }
+
         connector = aiohttp.TCPConnector(limit=20, ssl=False)
         async with aiohttp.ClientSession(connector=connector) as http_session:
-            tasks = [check_node(node, http_session) for node in nodes]
+            tasks = [
+                check_node(
+                    node,
+                    http_session,
+                    ssh_user_map.get(node.ip_address or node.hostname, SSH_USERNAME) or SSH_USERNAME,
+                )
+                for node in nodes
+            ]
             results_list = await asyncio.gather(*tasks, return_exceptions=True)
 
         for node, res in zip(nodes, results_list):

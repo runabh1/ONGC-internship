@@ -33,7 +33,7 @@ from backend.db import AsyncSessionLocal, engine
 from backend.models import (
     Base, MetricHistory, Node, NodeBaseline,
     NodeUserSession, NodeProcess, AnomalyEvent,
-    Alert, Incident, InfraCheck, Cluster,
+    Alert, Incident, InfraCheck, Cluster, ManagedNode,
 )
 from sqlalchemy import select, delete, and_
 
@@ -627,12 +627,21 @@ async def collect_node_processes() -> None:
             )
         ).scalars().all()
 
+        # Build IP → ssh_username map from ManagedNode table
+        # Each node can have its own SSH username; fall back to global SSH_USERNAME
+        managed_rows = (await session.execute(select(ManagedNode))).scalars().all()
+        ssh_user_map = {
+            mn.ip_address: (mn.ssh_username or SSH_USERNAME)
+            for mn in managed_rows
+        }
+
         for node in nodes:
             ip = node.ip_address or node.hostname
+            target_user = ssh_user_map.get(ip, SSH_USERNAME) or SSH_USERNAME
             try:
                 async with asyncssh.connect(
                     ip,
-                    username=SSH_USERNAME,
+                    username=target_user,
                     client_keys=[SSH_KEY_PATH],
                     known_hosts=None,
                     connect_timeout=5,

@@ -12,7 +12,7 @@ A full-stack AI-powered cluster monitoring system for ONGC field sites. It colle
 4. [Step 1 — Clone the Repository](#4-step-1--clone-the-repository)
 5. [Step 2 — Configure SSH Keys](#5-step-2--configure-ssh-keys)
 6. [Step 3 — Configure Environment Variables](#6-step-3--configure-environment-variables)
-7. [Step 4 — Register Your Nodes](#7-step-4--register-your-nodes)
+7. [Step 4 — Register Your Nodes (UI-Based)](#7-step-4--register-your-nodes-ui-based)
 8. [Step 5 — Build and Start with Docker](#8-step-5--build-and-start-with-docker)
 9. [Step 6 — Verify Everything is Running](#9-step-6--verify-everything-is-running)
 10. [Accessing the Dashboard](#10-accessing-the-dashboard)
@@ -51,10 +51,17 @@ A full-stack AI-powered cluster monitoring system for ONGC field sites. It colle
 
 The application has been finalized with the following production-ready features:
 
-* **Machine Learning Baseline Backfilling:** Anomaly detection models (Z-Score, EWMA, Isolation Forest) now automatically seed themselves by computing `mean`, `std`, `p95`, and `p99` baselines from up to 7 days of historical metric data. This ensures intelligent anomaly detection is accurate the moment the system starts.
-* **Deep OS Metadata via SSH:** The backend now actively fetches precise `os_version`, `architecture`, and `boot_time` (calculated from `/proc/uptime`) via SSH. These details are proudly displayed in the Node Drilldown UI.
-* **Process Sanitization:** The frontend's Top 20 Process list has been sanitized. Internal monitoring commands (e.g., `ps aux`, `sshd-session`) are dynamically filtered out to show only genuine cluster workloads.
-* **Incident Lifecycle Automation:** When an anomaly is resolved manually from the UI, the resolution cascades instantly through the database to close associated Incidents and Alerts, maintaining perfect system state synchronization.
+* **Node Management UI (No More YAML Editing):** Nodes are now managed entirely through the dashboard. Click **⚙️ Settings → Add Node**, enter the IP address and SSH username, validate connectivity live, and save. The system automatically updates `config/nodes.yaml` and reloads Prometheus — no terminal or file editing required.
+
+* **Per-Node SSH Usernames:** Every node in the cluster can have a **different SSH username**. This is essential for ONGC field deployments where different Linux servers may have different user accounts (e.g., `arunabh` on node-1, `oilrig` on node-2). The username is set per-node in the Settings UI and stored in the database. The global `SSH_USERNAME` in `.env` serves as a fallback for nodes with no username specified.
+
+* **Machine Learning Baseline Backfilling:** Anomaly detection models (Z-Score, EWMA, Isolation Forest) automatically seed themselves from up to 7 days of historical metric data.
+
+* **Deep OS Metadata via SSH:** The backend fetches `os_version`, `architecture`, and `boot_time` via SSH and displays them in the Node Drilldown UI.
+
+* **Process Sanitization:** Internal monitoring processes are filtered from the Top 20 Process list.
+
+* **Incident Lifecycle Automation:** Resolving an anomaly from the UI cascades to close associated Incidents and Alerts.
 
 ---
 
@@ -148,45 +155,57 @@ EMAIL_PASSWORD=your_gmail_app_password
 ALERT_EMAIL_TO=alerts@example.com
 ```
 
-> **Note on SSH_KEY_PATH:** The value must stay as `/root/.ssh/id_rsa`. This is the path **inside the Docker container**. Docker Compose automatically mounts your Windows `.ssh` folder into the container (see Step 4 below).
+> **Note on SSH_KEY_PATH:** The value must stay as `/root/.ssh/id_rsa`. This is the path **inside the Docker container**.
+
+> **Note on SSH_USERNAME:** This is the **default fallback** username used for nodes that do not have a specific SSH username configured in the Node Management UI. When you add a node through the Settings page, you can set its own SSH username — this overrides `SSH_USERNAME` for that specific node. This allows each Linux server in your ONGC cluster to have a different login account.
 
 ---
 
-## 7. Step 4 — Register Your Nodes
+## 7. Step 4 — Register Your Nodes (UI-Based)
 
-### 7a. Edit nodes list for Prometheus
+In this version, **you do not need to manually edit `config/nodes.yaml`**. Nodes are registered through the dashboard's built-in **Settings** page after the stack is running.
 
-Open `config/nodes.yaml` and replace the example IPs with your actual node IP addresses:
+> **Existing users:** If you have nodes already in `config/nodes.yaml`, they are automatically imported into the database on first startup — nothing will be lost.
 
-```yaml
-- labels:
-    job: node_exporter
-  targets:
-    - '192.168.56.101:9100'   # Node 1 — replace with real IP
-    - '192.168.56.102:9100'   # Node 2 — replace with real IP
-    - '192.168.56.103:9100'   # Node 3 — replace with real IP
-    # Add more lines here for additional nodes
+### Step-by-step: Adding a node from the UI
+
+1. Open the dashboard at **http://localhost:3001**
+2. Click **⚙️ Settings** in the top-right corner of the navigation bar
+3. Click **+ Add Node**
+4. Fill in the form:
+
+   | Field | Example | Notes |
+   |-------|---------|-------|
+   | **IP Address** | `192.168.1.101` | Required. Must be reachable from the monitoring PC |
+   | **Label** | `node-1` | Optional friendly display name |
+   | **SSH Username** | `arunabh` | The Linux username for SSH on this specific node |
+   | **Port** | `9100` | Default — only change if node_exporter runs on a different port |
+
+5. Click **🔍 Validate Connectivity** — this runs three checks:
+   - ✅ **Ping** — ICMP reachability
+   - ✅ **Port 9100** — TCP connection to node_exporter
+   - ✅ **SSH** — Key-based login test
+
+6. Click **💾 Save Node** — the system will:
+   - Save the node to PostgreSQL
+   - Regenerate `config/nodes.yaml`
+   - Reload Prometheus (via `/-/reload`)
+   - Begin monitoring within ~60 seconds (one collection cycle)
+
+### Per-node SSH usernames
+
+Each node can have its own SSH username — this is critical in ONGC environments where different servers may be set up with different accounts:
+
+```
+Node 192.168.1.101  →  SSH username: arunabh   (set in the UI)
+Node 192.168.1.102  →  SSH username: oilrig    (set in the UI)
+Node 192.168.1.103  →  SSH username: (empty)   →  falls back to SSH_USERNAME in .env
 ```
 
-### 7b. Update SSH mount path in docker-compose.yml
-
-Open `docker-compose.yml` and find the `backend` service volumes section.
-
-**If deploying on Windows:** Change `aruna` to your **Windows username**:
-
-```yaml
-    volumes:
-      - ./config:/app/config:ro
-      - "C:/Users/YOUR_WINDOWS_USERNAME/.ssh:/root/.ssh:ro"   # <-- change this
-```
-
-**If deploying the monitoring stack on Linux:** Change it to use your Linux home directory:
-
-```yaml
-    volumes:
-      - ./config:/app/config:ro
-      - "~/.ssh:/root/.ssh:ro"   # <-- use Linux home directory
-```
+Behind the scenes the system uses the per-node username for:
+- SSH process collection
+- SSH health checks
+- SSH connectivity validation
 
 ---
 
@@ -433,10 +452,15 @@ If you decide to deploy this entire monitoring stack (Docker Compose) on a **Lin
 git clone <repo-url>
 cd ongc-cluster-monitor
 copy .env.example .env
-# Edit .env  →  set passwords, SSH_USERNAME
-# Edit config/nodes.yaml  →  add your node IPs
+# Edit .env  →  set passwords, SSH_USERNAME (default/fallback)
 # Edit docker-compose.yml  →  update Windows username in SSH mount
 docker compose up --build -d
+# Then: open http://localhost:3001 → ⚙️ Settings → Add Node
+
+# ── Adding/removing nodes ─────────────────────────────────────
+# Open http://localhost:3001 → click ⚙️ Settings
+# Use Add Node / Edit / Delete buttons in the UI
+# No YAML editing needed — Prometheus reloads automatically
 
 # ── Daily use ────────────────────────────────────────────────
 docker compose up -d          # Start
