@@ -11,6 +11,30 @@ Base = declarative_base()
 
 
 # ---------------------------------------------------------------------------
+# ManagedNode — operator-controlled node registry (replaces manual nodes.yaml)
+# ---------------------------------------------------------------------------
+class ManagedNode(Base):
+    """Each row represents a node that the operator has added via the UI.
+    This is the single source of truth for which nodes are monitored.
+    Prometheus config/nodes.yaml is regenerated from this table whenever
+    rows are inserted, updated, or deleted.
+    """
+    __tablename__ = 'managed_nodes'
+    id                 = Column(Integer, primary_key=True)
+    ip_address         = Column(String(64),  nullable=False, unique=True)
+    label              = Column(String(128), nullable=True)   # friendly display name
+    ssh_username       = Column(String(128), nullable=True)   # stored for display / future per-node use
+    node_exporter_port = Column(Integer,     nullable=False, default=9100)
+    enabled            = Column(Boolean,     nullable=False, default=True)
+    # validation_status: 'pending' | 'ok' | 'failed' | 'unknown'
+    validation_status  = Column(String(32),  nullable=False, default='unknown')
+    validation_detail  = Column(Text,        nullable=True)
+    last_validated_at  = Column(DateTime,    nullable=True)
+    added_at           = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    updated_at         = Column(DateTime,    nullable=True,  onupdate=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Cluster — grid → cluster → host hierarchy (Ganglia-style)
 # ---------------------------------------------------------------------------
 class Cluster(Base):

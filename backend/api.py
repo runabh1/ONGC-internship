@@ -2,21 +2,29 @@
 FastAPI router for ONGC AI Cluster Monitor.
 
 Endpoints:
-  GET  /api/status
-  GET  /api/cluster/overview
-  GET  /api/cluster/summary          — aggregate CPU/MEM/Load/Disk/Net across nodes
-  GET  /api/cluster/nodes            — list with status + latest metrics + sparklines
-  GET  /api/cluster/history          — time-series for stacked area chart (all nodes, one metric)
-  GET  /api/cluster/anomaly-feed     — global anomaly timeline
-  GET  /api/cluster/node/{id}
-  GET  /api/cluster/node/{id}/metrics
-  GET  /api/cluster/node/{id}/anomalies
-  POST /api/cluster/node/{id}/anomalies/{anomaly_id}/resolve
-  GET  /api/cluster/node/{id}/health — infra check results (ping/node_exporter/prometheus/ssh)
-  GET  /api/cluster/node/{id}/users
-  GET  /api/cluster/node/{id}/processes
-  GET  /api/cluster/node/{id}/export — CSV or JSON metric export
-  WS   /ws/live                      — push updates to frontend every 30s
+  GET    /api/status
+  GET    /api/cluster/overview
+  GET    /api/cluster/summary
+  GET    /api/cluster/nodes
+  GET    /api/cluster/history
+  GET    /api/cluster/anomaly-feed
+  GET    /api/cluster/node/{id}
+  GET    /api/cluster/node/{id}/metrics
+  GET    /api/cluster/node/{id}/anomalies
+  POST   /api/cluster/node/{id}/anomalies/{anomaly_id}/resolve
+  GET    /api/cluster/node/{id}/health
+  GET    /api/cluster/node/{id}/users
+  GET    /api/cluster/node/{id}/processes
+  GET    /api/cluster/node/{id}/export
+  WS     /ws/live
+
+  --- Node Management (replaces manual nodes.yaml editing) ---
+  GET    /api/nodes/managed                — list all managed nodes
+  POST   /api/nodes/managed                — add a new node
+  PUT    /api/nodes/managed/{id}           — update a node
+  DELETE /api/nodes/managed/{id}           — remove a node
+  POST   /api/nodes/managed/{id}/validate  — run connectivity check
+  POST   /api/nodes/managed/reload-prometheus — regenerate YAML + reload
 """
 from typing import Optional
 import asyncio
@@ -24,6 +32,7 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from backend.services import (
     get_cluster_overview,
     get_cluster_summary,
@@ -41,6 +50,10 @@ from backend.services import (
     get_alerts_feed,
 )
 from backend.collector import backfill_baselines
+from backend.db import get_session
+from backend.models import ManagedNode
+from backend.node_manager import validate_node, sync_prometheus
+from sqlalchemy import select
 
 router = APIRouter()
 
@@ -247,6 +260,164 @@ async def trigger_backfill():
         return {'status': 'ok', 'message': 'Baseline backfill completed'}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+# ---------------------------------------------------------------------------
+# Node Management — CRUD + validate + Prometheus sync
+# ---------------------------------------------------------------------------
+
+class ManagedNodeCreate(BaseModel):
+    ip_address:         str         = Field(..., description='IPv4 address of the node')
+    label:              str | None  = Field(None, description='Optional friendly name')
+    ssh_username:       str | None  = Field(None, description='SSH username (stored for display)')
+    node_exporter_port: int         = Field(9100, description='node_exporter port')
+    enabled:            bool        = Field(True)
+
+class ManagedNodeUpdate(BaseModel):
+    ip_address:         str | None  = None
+    label:              str | None  = None
+    ssh_username:       str | None  = None
+    node_exporter_port: int | None  = None
+    enabled:            bool | None = None
+
+
+def _node_to_dict(n: ManagedNode) -> dict:
+    return {
+        'id':                 n.id,
+        'ip_address':         n.ip_address,
+        'label':              n.label,
+        'ssh_username':       n.ssh_username,
+        'node_exporter_port': n.node_exporter_port,
+        'enabled':            n.enabled,
+        'validation_status':  n.validation_status,
+        'validation_detail':  n.validation_detail,
+        'last_validated_at':  n.last_validated_at.isoformat() if n.last_validated_at else None,
+        'added_at':           n.added_at.isoformat() if n.added_at else None,
+    }
+
+
+@router.get('/nodes/managed')
+async def list_managed_nodes():
+    """Return all managed nodes from the DB."""
+    async with get_session() as session:
+        rows = (await session.execute(select(ManagedNode).order_by(ManagedNode.added_at))).scalars().all()
+        return [_node_to_dict(n) for n in rows]
+
+
+@router.post('/nodes/managed', status_code=201)
+async def add_managed_node(body: ManagedNodeCreate):
+    """Add a new node. Automatically regenerates nodes.yaml and reloads Prometheus."""
+    async with get_session() as session:
+        existing = (await session.execute(
+            select(ManagedNode).where(ManagedNode.ip_address == body.ip_address)
+        )).scalar_one_or_none()
+        if existing:
+            raise HTTPException(status_code=409, detail=f'Node {body.ip_address} already exists')
+
+        node = ManagedNode(
+            ip_address=body.ip_address,
+            label=body.label,
+            ssh_username=body.ssh_username,
+            node_exporter_port=body.node_exporter_port,
+            enabled=body.enabled,
+        )
+        session.add(node)
+        await session.commit()
+        await session.refresh(node)
+
+        # Sync Prometheus
+        all_nodes = (await session.execute(select(ManagedNode))).scalars().all()
+        await sync_prometheus(all_nodes)
+
+        return _node_to_dict(node)
+
+
+@router.put('/nodes/managed/{node_id}')
+async def update_managed_node(node_id: int, body: ManagedNodeUpdate):
+    """Update an existing managed node. Regenerates YAML + reloads Prometheus."""
+    async with get_session() as session:
+        node = await session.get(ManagedNode, node_id)
+        if node is None:
+            raise HTTPException(status_code=404, detail='Managed node not found')
+
+        if body.ip_address is not None:
+            node.ip_address = body.ip_address
+        if body.label is not None:
+            node.label = body.label
+        if body.ssh_username is not None:
+            node.ssh_username = body.ssh_username
+        if body.node_exporter_port is not None:
+            node.node_exporter_port = body.node_exporter_port
+        if body.enabled is not None:
+            node.enabled = body.enabled
+
+        await session.commit()
+        await session.refresh(node)
+
+        all_nodes = (await session.execute(select(ManagedNode))).scalars().all()
+        await sync_prometheus(all_nodes)
+
+        return _node_to_dict(node)
+
+
+@router.delete('/nodes/managed/{node_id}', status_code=200)
+async def delete_managed_node(node_id: int):
+    """Remove a managed node. Regenerates YAML + reloads Prometheus."""
+    async with get_session() as session:
+        node = await session.get(ManagedNode, node_id)
+        if node is None:
+            raise HTTPException(status_code=404, detail='Managed node not found')
+
+        ip = node.ip_address
+        await session.delete(node)
+        await session.commit()
+
+        all_nodes = (await session.execute(select(ManagedNode))).scalars().all()
+        await sync_prometheus(all_nodes)
+
+        return {'status': 'deleted', 'ip_address': ip}
+
+
+@router.post('/nodes/managed/{node_id}/validate')
+async def validate_managed_node(node_id: int):
+    """Run connectivity checks (ping + port + SSH) against a managed node."""
+    async with get_session() as session:
+        node = await session.get(ManagedNode, node_id)
+        if node is None:
+            raise HTTPException(status_code=404, detail='Managed node not found')
+
+        result = await validate_node(
+            ip=node.ip_address,
+            port=node.node_exporter_port,
+            ssh_username=node.ssh_username,
+        )
+
+        node.validation_status = result['overall']
+        node.validation_detail = result['summary']
+        node.last_validated_at = datetime.utcnow()
+        await session.commit()
+
+        return {**result, 'node_id': node_id, 'ip_address': node.ip_address}
+
+
+@router.post('/nodes/managed/validate-new')
+async def validate_new_node(body: ManagedNodeCreate):
+    """Validate connectivity for a node that has NOT been saved yet (pre-save check)."""
+    result = await validate_node(
+        ip=body.ip_address,
+        port=body.node_exporter_port,
+        ssh_username=body.ssh_username,
+    )
+    return result
+
+
+@router.post('/nodes/managed/reload-prometheus')
+async def trigger_prometheus_reload():
+    """Manually regenerate nodes.yaml from DB and reload Prometheus."""
+    async with get_session() as session:
+        all_nodes = (await session.execute(select(ManagedNode))).scalars().all()
+    result = await sync_prometheus(all_nodes)
+    return result
+
 
 # ---------------------------------------------------------------------------
 # WebSocket — live push

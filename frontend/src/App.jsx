@@ -1103,6 +1103,354 @@ function NodeModal({ node, onClose, onResolveAnomaly }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Node Management Page
+   ─────────────────────────────────────────────────────────────────────────*/
+function NodeManagementPage() {
+  const [managedNodes, setManagedNodes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editNode, setEditNode] = useState(null); // null = add mode, object = edit mode
+  const [form, setForm] = useState({ ip_address: '', label: '', ssh_username: '', node_exporter_port: 9100, enabled: true });
+  const [validating, setValidating] = useState(false);
+  const [validateResult, setValidateResult] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null); // { msg, type: 'ok'|'err' }
+  const [deletingId, setDeletingId] = useState(null);
+  const [nodeValidating, setNodeValidating] = useState(null); // id being validated
+
+  const showToast = (msg, type = 'ok') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const fetchNodes = useCallback(() => {
+    setLoading(true);
+    axios.get(`${API}/api/nodes/managed`)
+      .then(r => setManagedNodes(r.data))
+      .catch(() => showToast('Failed to load managed nodes', 'err'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { fetchNodes(); }, [fetchNodes]);
+
+  const openAdd = () => {
+    setEditNode(null);
+    setForm({ ip_address: '', label: '', ssh_username: '', node_exporter_port: 9100, enabled: true });
+    setValidateResult(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (node) => {
+    setEditNode(node);
+    setForm({
+      ip_address: node.ip_address,
+      label: node.label || '',
+      ssh_username: node.ssh_username || '',
+      node_exporter_port: node.node_exporter_port,
+      enabled: node.enabled,
+    });
+    setValidateResult(null);
+    setShowForm(true);
+  };
+
+  const handleValidate = async () => {
+    if (!form.ip_address.trim()) { showToast('Enter an IP address first', 'err'); return; }
+    setValidating(true);
+    setValidateResult(null);
+    try {
+      const r = await axios.post(`${API}/api/nodes/managed/validate-new`, {
+        ip_address: form.ip_address.trim(),
+        label: form.label || null,
+        ssh_username: form.ssh_username || null,
+        node_exporter_port: Number(form.node_exporter_port) || 9100,
+        enabled: true,
+      });
+      setValidateResult(r.data);
+    } catch (e) {
+      setValidateResult({ overall: 'failed', summary: e?.response?.data?.detail || 'Request failed',
+        ping: { passed: false, detail: '—' }, port: { passed: false, detail: '—' }, ssh: { passed: false, detail: '—' } });
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!form.ip_address.trim()) { showToast('IP address is required', 'err'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        ip_address: form.ip_address.trim(),
+        label: form.label.trim() || null,
+        ssh_username: form.ssh_username.trim() || null,
+        node_exporter_port: Number(form.node_exporter_port) || 9100,
+        enabled: form.enabled,
+      };
+      if (editNode) {
+        await axios.put(`${API}/api/nodes/managed/${editNode.id}`, payload);
+        showToast(`Node ${form.ip_address} updated and Prometheus reloaded`);
+      } else {
+        await axios.post(`${API}/api/nodes/managed`, payload);
+        showToast(`Node ${form.ip_address} added and Prometheus reloaded`);
+      }
+      setShowForm(false);
+      fetchNodes();
+    } catch (e) {
+      const detail = e?.response?.data?.detail || 'Save failed';
+      showToast(detail, 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (node) => {
+    if (!window.confirm(`Remove node ${node.ip_address} from monitoring?`)) return;
+    setDeletingId(node.id);
+    try {
+      await axios.delete(`${API}/api/nodes/managed/${node.id}`);
+      showToast(`Node ${node.ip_address} removed and Prometheus reloaded`);
+      fetchNodes();
+    } catch (e) {
+      showToast(e?.response?.data?.detail || 'Delete failed', 'err');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleValidateExisting = async (node) => {
+    setNodeValidating(node.id);
+    try {
+      await axios.post(`${API}/api/nodes/managed/${node.id}/validate`);
+      fetchNodes();
+      showToast(`Validation complete for ${node.ip_address}`);
+    } catch (e) {
+      showToast('Validation failed: ' + (e?.response?.data?.detail || ''), 'err');
+    } finally {
+      setNodeValidating(null);
+    }
+  };
+
+  const handleToggleEnabled = async (node) => {
+    try {
+      await axios.put(`${API}/api/nodes/managed/${node.id}`, { enabled: !node.enabled });
+      showToast(`Node ${node.ip_address} ${!node.enabled ? 'enabled' : 'disabled'}`);
+      fetchNodes();
+    } catch (e) {
+      showToast('Update failed', 'err');
+    }
+  };
+
+  const card = {
+    background: '#ffffff', borderRadius: 16, border: '1px solid rgba(148,163,184,0.18)',
+    padding: '24px 28px', boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
+  };
+  const inp = {
+    width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 13, color: '#0f172a',
+    border: '1px solid rgba(148,163,184,0.35)', background: '#f8fafc', outline: 'none',
+    fontFamily: "'Inter', sans-serif",
+  };
+  const btn = (bg, fg = '#fff') => ({
+    background: bg, color: fg, border: 'none', borderRadius: 8,
+    padding: '8px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    fontFamily: "'Inter', sans-serif", transition: 'opacity 0.15s',
+  });
+
+  const statusBadge = (status) => {
+    const map = { ok: ['#dcfce7', '#166534', '✅'], failed: ['#fef2f2', '#991b1b', '❌'], pending: ['#fefce8', '#854d0e', '⏳'], unknown: ['#f1f5f9', '#475569', '❔'] };
+    const [bg, fg, ic] = map[status] || map.unknown;
+    return (
+      <span style={{ background: bg, color: fg, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
+        {ic} {status?.toUpperCase() || 'UNKNOWN'}
+      </span>
+    );
+  };
+
+  const checkRow = (label, result) => (
+    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px',
+      background: result?.passed ? 'rgba(74,222,128,0.07)' : 'rgba(248,113,113,0.07)',
+      borderRadius: 8, border: `1px solid ${result?.passed ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)'}` }}>
+      <span style={{ fontSize: 16 }}>{result?.passed ? '✅' : '❌'}</span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>{label}</div>
+        <div style={{ fontSize: 11, color: '#64748b' }}>{result?.detail || '—'}</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: '28px 28px', fontFamily: "'Inter', sans-serif" }}>
+
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 80, right: 28, zIndex: 9999,
+          background: toast.type === 'ok' ? '#166534' : '#991b1b',
+          color: '#fff', borderRadius: 10, padding: '12px 20px', fontSize: 13,
+          fontWeight: 600, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {toast.type === 'ok' ? '✅' : '❌'} {toast.msg}
+        </div>
+      )}
+
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 22, color: '#0f172a', letterSpacing: -0.3 }}>⚙️ Node Management</div>
+          <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+            Add, edit, or remove monitored nodes. Changes are applied to Prometheus immediately — no YAML editing required.
+          </div>
+        </div>
+        <button id="btn-add-node" onClick={openAdd} style={{ ...btn('linear-gradient(135deg,#0ea5e9,#6366f1)'), padding: '10px 20px', fontSize: 13 }}>
+          + Add Node
+        </button>
+      </div>
+
+      {/* Add / Edit Form */}
+      {showForm && (
+        <div style={{ ...card, marginBottom: 24, border: '1.5px solid rgba(99,102,241,0.3)', background: 'rgba(248,250,252,1)' }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', marginBottom: 18 }}>
+            {editNode ? `✏️ Edit Node — ${editNode.ip_address}` : '➕ Add New Node'}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 5 }}>IP ADDRESS *</label>
+              <input id="input-ip" style={inp} placeholder="192.168.1.101" value={form.ip_address}
+                onChange={e => { setForm(f => ({ ...f, ip_address: e.target.value })); setValidateResult(null); }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 5 }}>LABEL (optional)</label>
+              <input id="input-label" style={inp} placeholder="node-1 (optional friendly name)" value={form.label}
+                onChange={e => setForm(f => ({ ...f, label: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 5 }}>SSH USERNAME</label>
+              <input id="input-ssh-user" style={inp} placeholder="arunabh" value={form.ssh_username}
+                onChange={e => setForm(f => ({ ...f, ssh_username: e.target.value }))} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 5 }}>NODE EXPORTER PORT</label>
+              <input id="input-port" style={inp} type="number" min={1} max={65535} value={form.node_exporter_port}
+                onChange={e => setForm(f => ({ ...f, node_exporter_port: Number(e.target.value) }))} />
+            </div>
+          </div>
+
+          {/* Validate result */}
+          {validateResult && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Connectivity Check — {validateResult.overall === 'ok' ? '✅ Passed' : '❌ Issues Found'}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {checkRow('Ping (ICMP)', validateResult.ping)}
+                {checkRow(`Port ${form.node_exporter_port} (node_exporter)`, validateResult.port)}
+                {checkRow('SSH', validateResult.ssh)}
+              </div>
+              {validateResult.summary && (
+                <div style={{ marginTop: 8, fontSize: 11, color: '#64748b', padding: '6px 10px', background: '#f8fafc', borderRadius: 6 }}>
+                  {validateResult.summary}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button id="btn-validate" onClick={handleValidate} disabled={validating} style={{ ...btn('#f1f5f9', '#0f172a'), border: '1px solid rgba(148,163,184,0.4)' }}>
+              {validating ? '⏳ Checking…' : '🔍 Validate Connectivity'}
+            </button>
+            <button id="btn-save" onClick={handleSave} disabled={saving} style={btn('linear-gradient(135deg,#0ea5e9,#6366f1)')}>
+              {saving ? '⏳ Saving…' : '💾 Save Node'}
+            </button>
+            <button onClick={() => { setShowForm(false); setValidateResult(null); }} style={{ ...btn('#f1f5f9', '#64748b'), border: '1px solid rgba(148,163,184,0.3)' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Nodes Table */}
+      <div style={card}>
+        {loading ? (
+          <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>Loading managed nodes…</div>
+        ) : managedNodes.length === 0 ? (
+          <div style={{ padding: 48, textAlign: 'center' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📭</div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: '#0f172a', marginBottom: 6 }}>No nodes registered yet</div>
+            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Click <strong>+ Add Node</strong> to register your first Linux node.</div>
+            <button onClick={openAdd} style={btn('linear-gradient(135deg,#0ea5e9,#6366f1)')}>
+              + Add Your First Node
+            </button>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid rgba(148,163,184,0.15)' }}>
+                  {['IP Address', 'Label', 'SSH User', 'Port', 'Enabled', 'Validation', 'Last Checked', 'Actions'].map(h => (
+                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11,
+                      color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {managedNodes.map((node, i) => (
+                  <tr key={node.id} style={{ borderBottom: '1px solid rgba(148,163,184,0.1)', background: i % 2 === 0 ? '#ffffff' : '#fafbfc', transition: 'background 0.1s' }}>
+                    <td style={{ padding: '12px 14px', fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>{node.ip_address}</td>
+                    <td style={{ padding: '12px 14px', color: '#475569' }}>{node.label || <span style={{ color: '#cbd5e1', fontStyle: 'italic' }}>—</span>}</td>
+                    <td style={{ padding: '12px 14px', color: '#475569', fontFamily: 'monospace', fontSize: 12 }}>{node.ssh_username || <span style={{ color: '#cbd5e1' }}>—</span>}</td>
+                    <td style={{ padding: '12px 14px', color: '#64748b' }}>{node.node_exporter_port}</td>
+                    <td style={{ padding: '12px 14px' }}>
+                      <button onClick={() => handleToggleEnabled(node)} style={{
+                        background: node.enabled ? 'rgba(74,222,128,0.12)' : 'rgba(148,163,184,0.12)',
+                        color: node.enabled ? '#166534' : '#475569',
+                        border: `1px solid ${node.enabled ? 'rgba(74,222,128,0.4)' : 'rgba(148,163,184,0.3)'}`,
+                        borderRadius: 6, padding: '3px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      }}>
+                        {node.enabled ? '● ON' : '○ OFF'}
+                      </button>
+                    </td>
+                    <td style={{ padding: '12px 14px' }}>{statusBadge(node.validation_status)}</td>
+                    <td style={{ padding: '12px 14px', fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                      {node.last_validated_at ? timeAgo(node.last_validated_at) : '—'}
+                    </td>
+                    <td style={{ padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'nowrap' }}>
+                        <button title="Validate connectivity" onClick={() => handleValidateExisting(node)}
+                          disabled={nodeValidating === node.id}
+                          style={{ ...btn('#f1f5f9', '#0f172a'), padding: '5px 10px', border: '1px solid rgba(148,163,184,0.3)', fontSize: 11 }}>
+                          {nodeValidating === node.id ? '⏳' : '🔍'}
+                        </button>
+                        <button title="Edit node" onClick={() => openEdit(node)}
+                          style={{ ...btn('rgba(99,102,241,0.1)', '#4f46e5'), padding: '5px 10px', border: '1px solid rgba(99,102,241,0.25)', fontSize: 11 }}>
+                          ✏️
+                        </button>
+                        <button title="Remove node" onClick={() => handleDelete(node)}
+                          disabled={deletingId === node.id}
+                          style={{ ...btn('rgba(248,113,113,0.1)', '#dc2626'), padding: '5px 10px', border: '1px solid rgba(248,113,113,0.25)', fontSize: 11 }}>
+                          {deletingId === node.id ? '⏳' : '🗑️'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Info box */}
+      <div style={{ marginTop: 20, padding: '14px 18px', background: 'rgba(14,165,233,0.06)',
+        border: '1px solid rgba(14,165,233,0.2)', borderRadius: 12, fontSize: 12, color: '#0369a1' }}>
+        <strong>ℹ️ How it works:</strong> When you add, edit, or remove a node, the system automatically updates
+        <code style={{ background: 'rgba(14,165,233,0.1)', padding: '1px 5px', borderRadius: 4 }}>config/nodes.yaml</code>
+        and reloads Prometheus. The node appears in the dashboard within one collection cycle (~60 seconds).
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Main App
    ───────────────────────────────────────────────────────────────────────── */
 export default function App() {
@@ -1122,6 +1470,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState('cards'); // 'cards' | 'grid' | 'table'
   const [wsStatus, setWsStatus] = useState('connecting');
   const [incAlertTab, setIncAlertTab] = useState('incidents'); // 'incidents' | 'alerts'
+  const [page, setPage] = useState('dashboard'); // 'dashboard' | 'settings'
 
   const currentMetricDef = METRICS[chartMetric];
 
@@ -1290,9 +1639,26 @@ export default function App() {
             color: '#00d4ff', borderRadius: 8, padding: '6px 14px', cursor: 'pointer',
             fontSize: 12, fontWeight: 600,
           }}>↺ Refresh</button>
+          <button
+            id="btn-settings"
+            onClick={() => setPage(p => p === 'settings' ? 'dashboard' : 'settings')}
+            style={{
+              background: page === 'settings' ? 'rgba(99,102,241,0.15)' : 'rgba(148,163,184,0.1)',
+              border: page === 'settings' ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(148,163,184,0.3)',
+              color: page === 'settings' ? '#4f46e5' : '#475569',
+              borderRadius: 8, padding: '6px 14px', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600,
+            }}>
+            ⚙️ {page === 'settings' ? 'Dashboard' : 'Settings'}
+          </button>
         </div>
       </div>
 
+      {/* ── Settings Page ── */}
+      {page === 'settings' && <NodeManagementPage />}
+
+      {/* ── Dashboard ── */}
+      {page === 'dashboard' && (
       <div style={{ padding: '22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* ── Cluster Aggregate Bar ── */}
@@ -1575,8 +1941,8 @@ export default function App() {
             )
           )}
         </div>
-
       </div>
+      )}
 
       {/* ── Node Drilldown Modal ── */}
       {selectedNode && (

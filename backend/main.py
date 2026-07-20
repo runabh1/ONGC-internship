@@ -45,6 +45,27 @@ async def startup_event() -> None:
     await init_db()
     logger.info('Database initialised')
 
+    # Migrate: seed managed_nodes from nodes.yaml if table is empty (one-time)
+    try:
+        from backend.collector import seed_managed_nodes_from_yaml
+        await seed_managed_nodes_from_yaml()
+        logger.info('managed_nodes seed complete')
+    except Exception as exc:
+        logger.warning('managed_nodes seed failed: %s', exc)
+
+    # Sync Prometheus config from the DB so the UI-managed list is always active
+    try:
+        from backend.db import get_session
+        from backend.models import ManagedNode
+        from backend.node_manager import sync_prometheus
+        from sqlalchemy import select
+        async with get_session() as session:
+            all_nodes = (await session.execute(select(ManagedNode))).scalars().all()
+        await sync_prometheus(all_nodes)
+        logger.info('Prometheus synced from managed_nodes on startup')
+    except Exception as exc:
+        logger.warning('Startup Prometheus sync failed (nodes.yaml may be stale): %s', exc)
+
     # Run first Prometheus scrape immediately so UI has data
     try:
         await collect_demo_metrics()

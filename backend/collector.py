@@ -168,7 +168,43 @@ async def get_or_create_node(session, hostname: str, ip: str = '') -> Node:
     return node
 
 
+async def seed_managed_nodes_from_yaml() -> None:
+    """One-time migration: if managed_nodes table is empty, seed it from nodes.yaml.
+    This preserves any nodes already in nodes.yaml when the feature is first deployed.
+    After the first run the UI-managed DB is the source of truth.
+    """
+    from backend.models import ManagedNode
+    targets = load_targets_from_yaml()
+    if not targets:
+        logger.info('seed_managed_nodes_from_yaml: nodes.yaml empty or missing — skipping seed')
+        return
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import func, select as sa_select
+        count = await session.scalar(sa_select(func.count()).select_from(ManagedNode))
+        if count and count > 0:
+            logger.info('seed_managed_nodes_from_yaml: managed_nodes already has %d row(s) — skipping seed', count)
+            return
+        for ip, port in targets:
+            existing = (await session.execute(
+                sa_select(ManagedNode).where(ManagedNode.ip_address == ip)
+            )).scalar_one_or_none()
+            if existing is None:
+                session.add(ManagedNode(
+                    ip_address=ip,
+                    label=None,
+                    ssh_username=os.getenv('SSH_USERNAME', ''),
+                    node_exporter_port=int(port) if port else 9100,
+                    enabled=True,
+                    validation_status='unknown',
+                ))
+        await session.commit()
+    logger.info('Seeded %d node(s) from nodes.yaml into managed_nodes', len(targets))
+
+
 async def register_yaml_nodes() -> None:
+    """Register nodes from nodes.yaml into the Node (monitoring) table.
+    Also ensures managed_nodes are used as the source of truth via seed.
+    """
     targets = load_targets_from_yaml()
     if not targets:
         return
@@ -912,6 +948,11 @@ async def backfill_baselines() -> None:
 # ---------------------------------------------------------------------------
 async def run_collector() -> None:
     await init_db()
+    # One-time migration: seed managed_nodes table from nodes.yaml if empty
+    try:
+        await seed_managed_nodes_from_yaml()
+    except Exception as exc:
+        logger.warning('managed_nodes seed failed: %s', exc)
     await cleanup_unregistered_nodes()
     await register_yaml_nodes()
     logger.info('Collector started — Prometheus: %s | Interval: %ds | Warmup: %ds',
