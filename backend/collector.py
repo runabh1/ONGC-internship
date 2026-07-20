@@ -749,20 +749,24 @@ async def collect_node_processes() -> None:
                                 if len(wparts) < 2:
                                     continue
                                 uname = wparts[0][:128]
-                                
-                                # If the second column is an IP (contains '.') or IPv6/display (':'), TTY is missing
-                                if '.' in wparts[1] or ':' in wparts[1] and 'tty' not in wparts[1] and 'pts' not in wparts[1]:
-                                    terminal = None
-                                    remote = wparts[1][:128]
-                                else:
-                                    terminal = wparts[1][:64]
-                                    remote = wparts[2][:128] if len(wparts) > 2 else None
-                                
-                                # Ignore non-interactive background SSH sessions (like our own collector)
+
+                                # `w -hi` output varies by distro — scan for the tty column
+                                # rather than assuming a fixed position.
+                                terminal = None
+                                remote = None
+                                for wp in wparts[1:]:
+                                    if wp.startswith('pts/') or wp.startswith('tty'):
+                                        terminal = wp[:64]
+                                    elif '.' in wp or (':' in wp and not wp.startswith('[')):
+                                        # looks like an IPv4 or IPv6 address
+                                        if remote is None:
+                                            remote = wp[:128]
+
+                                # Skip rows with no interactive terminal (e.g. background SSH)
                                 if terminal is None:
                                     continue
-                                
-                                # Preserve original login time if this session existed in the previous cycle
+
+                                # Preserve original login time if this session existed before
                                 session_key = (uname, terminal, remote)
                                 original_login_time = login_times.get(session_key, now)
 
