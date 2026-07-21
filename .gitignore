@@ -1,30 +1,84 @@
-# Python virtual environments
+# ============================================================
+# ONGC AI Cluster Monitor — .gitignore
+# ============================================================
+
+# --- Secrets / Environment ---
+.env
+.env.*
+!.env.example
+
+# --- Node.js / Frontend ---
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
+# --- Python ---
 .venv/
 .venv_tf/
 venv/
 ENV/
 env/
-
-# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# Jupyter Notebook checkpoints
+# --- Jupyter ---
 .ipynb_checkpoints/
 
-# VS Code
-.vscode/
+# --- ML model artefacts (large binary files — regenerated at runtime) ---
+ml/models/*.joblib
+ml/models/*.pkl
 
-# OS files
+# --- Test / debug JSON dumps ---
+*.json
+!package.json
+!frontend/package.json
+!ml/models/*.json
+
+# --- Test database ---
+*.db
+*.sqlite
+
+# --- Scratch / test scripts output ---
+latest_metric.json
+node1.json
+node1_metrics.json
+node1_proc.json
+node2.json
+node2_proc.json
+node3.json
+node3_proc.json
+node_proc.json
+nodes.json
+prom.json
+summary.json
+queryex
+
+# --- Python wheel downloads (pipcheck folder) ---
+pipcheck/
+
+# --- Logs ---
+*.log
+TEST_REPORT.md
+logs/
+
+# --- Docker ---
+.dockerignore
+
+# --- IDE / OS ---
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
 
-# Environment files
-.env
-.env.*
-!.env.example
-
-# Logs and reports
-*.log
-TEST_REPORT.md
+# --- Git ---
+*.orig
