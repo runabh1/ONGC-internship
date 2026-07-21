@@ -7,6 +7,14 @@
 .env.*
 !.env.example
 
+# --- Python Virtual Environments ---
+.venv/
+.venv_tf/
+.venv312/
+venv/
+ENV/
+env/
+
 # --- Node.js / Frontend ---
 node_modules/
 frontend/node_modules/
