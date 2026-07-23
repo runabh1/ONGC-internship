@@ -245,20 +245,41 @@ function ClusterOverviewChart({ rawHistory, allNodes, metricLabel, metricUnit })
     const hosts = [...new Set(rawHistory.map(r => r.hostname))].sort();
     const timeMap = new Map();
     for (const row of rawHistory) {
-      let t;
-      if (row.timestamp && row.timestamp.endsWith('00:00:00')) {
-        t = row.timestamp.substring(5, 16);
-      } else {
-        const istDate = toIST(row.timestamp);
-        t = istDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }).split(' ')[0] ||
-          istDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (!row.timestamp) continue;
+      const d = toUTC(row.timestamp);
+      if (!d || isNaN(d.getTime())) continue;
+      const key = row.timestamp;
+      if (!timeMap.has(key)) {
+        timeMap.set(key, { rawTs: d.getTime(), iso: key });
       }
-      if (!timeMap.has(t)) timeMap.set(t, { time: t });
-      if (timeMap.get(t)[row.hostname] === undefined) {
-        timeMap.get(t)[row.hostname] = parseFloat(row.value.toFixed(2));
+      const item = timeMap.get(key);
+      if (item[row.hostname] === undefined) {
+        item[row.hostname] = parseFloat(row.value.toFixed(2));
       }
     }
-    const data = Array.from(timeMap.values()).sort((a, b) => a.time.localeCompare(b.time));
+
+    const sortedItems = Array.from(timeMap.values()).sort((a, b) => a.rawTs - b.rawTs);
+    if (sortedItems.length === 0) return { chartData: [], hostnames: hosts };
+
+    const minTs = sortedItems[0].rawTs;
+    const maxTs = sortedItems[sortedItems.length - 1].rawTs;
+    const spanHours = (maxTs - minTs) / (1000 * 60 * 60);
+
+    const data = sortedItems.map(item => {
+      const d = new Date(item.rawTs);
+      let timeLabel;
+      if (spanHours > 168) {
+        timeLabel = d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' });
+      } else if (spanHours > 24) {
+        const dateStr = d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' });
+        const timeStr = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
+        timeLabel = `${dateStr} ${timeStr}`;
+      } else {
+        timeLabel = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
+      }
+      return { ...item, time: timeLabel };
+    });
+
     return { chartData: data, hostnames: hosts };
   }, [rawHistory]);
 
